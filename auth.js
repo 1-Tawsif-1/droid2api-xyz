@@ -12,7 +12,8 @@ let lastRefreshTime = null;
 let clientId = null;
 let authSource = null; // 'env' or 'file' or 'factory_key' or 'client'
 let authFilePath = null;
-let factoryApiKey = null; // From FACTORY_API_KEY environment variable
+let factoryApiKeys = []; // Array of Factory API keys for fallback support
+let currentKeyIndex = 0; // Track which key is currently active
 
 const REFRESH_URL = 'https://api.workos.com/user_management/authenticate';
 const REFRESH_INTERVAL_HOURS = 6; // Refresh every 6 hours
@@ -63,13 +64,27 @@ function generateClientId() {
  * Priority: FACTORY_API_KEY > refresh token mechanism > client authorization
  */
 function loadAuthConfig() {
-  // 1. Check FACTORY_API_KEY environment variable (highest priority)
-  const factoryKey = process.env.FACTORY_API_KEY;
-  if (factoryKey && factoryKey.trim() !== '') {
-    logInfo('Using fixed API key from FACTORY_API_KEY environment variable');
-    factoryApiKey = factoryKey.trim();
+  // 1. Check FACTORY_API_KEY environment variables (highest priority)
+  // Support FACTORY_API_KEY and FACTORY_API_KEY_2 for fallback
+  const factoryKey1 = process.env.FACTORY_API_KEY;
+  const factoryKey2 = process.env.FACTORY_API_KEY_2;
+
+  if (factoryKey1 && factoryKey1.trim() !== '') {
+    factoryApiKeys.push(factoryKey1.trim());
+  }
+  if (factoryKey2 && factoryKey2.trim() !== '') {
+    factoryApiKeys.push(factoryKey2.trim());
+  }
+
+  if (factoryApiKeys.length > 0) {
+    logInfo(`Loaded ${factoryApiKeys.length} Factory API key(s) for fallback support`);
+    logInfo(`Primary key: FACTORY_API_KEY (${factoryApiKeys[0].substring(0, 10)}...)`);
+    if (factoryApiKeys.length > 1) {
+      logInfo(`Fallback key: FACTORY_API_KEY_2 (${factoryApiKeys[1].substring(0, 10)}...)`);
+    }
     authSource = 'factory_key';
-    return { type: 'factory_key', value: factoryKey.trim() };
+    currentKeyIndex = 0;
+    return { type: 'factory_key', value: factoryApiKeys };
   }
 
   // 2. Check refresh token mechanism (DROID_REFRESH_KEY)
@@ -267,11 +282,13 @@ export async function initializeAuth() {
  * @param {string} clientAuthorization - Authorization header from client request (optional)
  */
 export async function getApiKey(clientAuthorization = null) {
-  // Priority 1: FACTORY_API_KEY environment variable
-  if (authSource === 'factory_key' && factoryApiKey) {
-    return `Bearer ${factoryApiKey}`;
+  // Priority 1: FACTORY_API_KEY environment variable(s)
+  if (authSource === 'factory_key' && factoryApiKeys.length > 0) {
+    const currentKey = factoryApiKeys[currentKeyIndex];
+    logDebug(`Using Factory API key #${currentKeyIndex + 1} (${currentKey.substring(0, 10)}...)`);
+    return `Bearer ${currentKey}`;
   }
-  
+
   // Priority 2: Refresh token mechanism
   if (authSource === 'env' || authSource === 'file') {
     // Check if we need to refresh
@@ -286,13 +303,58 @@ export async function getApiKey(clientAuthorization = null) {
 
     return `Bearer ${currentApiKey}`;
   }
-  
+
   // Priority 3: Client authorization header
   if (clientAuthorization) {
     logDebug('Using client authorization header');
     return clientAuthorization;
   }
-  
+
   // No authorization available
   throw new Error('No authorization available. Please configure FACTORY_API_KEY, refresh token, or provide client authorization.');
+}
+
+/**
+ * Rotate to next available Factory API key
+ * Returns true if rotation was successful, false if no more keys available
+ */
+export function rotateFactoryApiKey() {
+  if (authSource !== 'factory_key' || factoryApiKeys.length <= 1) {
+    return false;
+  }
+
+  const oldIndex = currentKeyIndex;
+  currentKeyIndex = (currentKeyIndex + 1) % factoryApiKeys.length;
+
+  console.log('\n' + '='.repeat(80));
+  console.log('🔄 FACTORY API KEY ROTATION');
+  console.log('='.repeat(80));
+  console.log(`Previous key: #${oldIndex + 1} (${factoryApiKeys[oldIndex].substring(0, 10)}...)`);
+  console.log(`New active key: #${currentKeyIndex + 1} (${factoryApiKeys[currentKeyIndex].substring(0, 10)}...)`);
+  console.log(`Reason: Previous key failed (quota exceeded or authentication error)`);
+  console.log('='.repeat(80) + '\n');
+
+  logInfo(`Rotated to Factory API key #${currentKeyIndex + 1}`);
+  return true;
+}
+
+/**
+ * Check if we have more Factory API keys available for fallback
+ */
+export function hasMoreFactoryKeys() {
+  return authSource === 'factory_key' && factoryApiKeys.length > 1 && currentKeyIndex < factoryApiKeys.length - 1;
+}
+
+/**
+ * Get current Factory API key info for logging
+ */
+export function getCurrentKeyInfo() {
+  if (authSource === 'factory_key' && factoryApiKeys.length > 0) {
+    return {
+      index: currentKeyIndex + 1,
+      total: factoryApiKeys.length,
+      preview: factoryApiKeys[currentKeyIndex].substring(0, 10) + '...'
+    };
+  }
+  return null;
 }

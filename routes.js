@@ -7,10 +7,100 @@ import { transformToOpenAI, getOpenAIHeaders } from './transformers/request-open
 import { transformToCommon, getCommonHeaders } from './transformers/request-common.js';
 import { AnthropicResponseTransformer } from './transformers/response-anthropic.js';
 import { OpenAIResponseTransformer } from './transformers/response-openai.js';
-import { getApiKey } from './auth.js';
+import { getApiKey, rotateFactoryApiKey, hasMoreFactoryKeys, getCurrentKeyInfo } from './auth.js';
 import { getNextProxyAgent } from './proxy-manager.js';
 
 const router = express.Router();
+
+/**
+ * Check if error response indicates quota exceeded or auth failure
+ * Status codes: 429 (quota), 401/403 (auth), 402 (payment required)
+ */
+function isQuotaOrAuthError(statusCode) {
+  return statusCode === 429 || statusCode === 401 || statusCode === 403 || statusCode === 402;
+}
+
+/**
+ * Make a fetch request with automatic Factory API key fallback on quota/auth errors
+ * @param {string} url - The endpoint URL
+ * @param {object} fetchOptions - Fetch options (method, headers, body)
+ * @param {string} endpointName - Name for logging (e.g., "chat completions")
+ * @returns {Promise<Response>} - The fetch response
+ */
+async function fetchWithFallback(url, fetchOptions, endpointName) {
+  let lastError = null;
+  let attempt = 1;
+  const maxAttempts = 2; // Try primary key, then fallback key
+
+  while (attempt <= maxAttempts) {
+    try {
+      const keyInfo = getCurrentKeyInfo();
+      if (keyInfo) {
+        logInfo(`[Attempt ${attempt}/${maxAttempts}] Using Factory API key #${keyInfo.index}/${keyInfo.total} for ${endpointName}`);
+      }
+
+      const response = await fetch(url, fetchOptions);
+
+      // Check if we got a quota or auth error
+      if (isQuotaOrAuthError(response.status)) {
+        const errorText = await response.text();
+
+        console.log('\n' + '='.repeat(80));
+        console.log('⚠️  API KEY FAILURE DETECTED');
+        console.log('='.repeat(80));
+        console.log(`Endpoint: ${endpointName}`);
+        console.log(`Status: ${response.status}`);
+        console.log(`Error: ${errorText.substring(0, 200)}`);
+        console.log(`Attempt: ${attempt}/${maxAttempts}`);
+        console.log('='.repeat(80) + '\n');
+
+        logError(`Factory API key failed with status ${response.status}`, new Error(errorText));
+
+        // Try to rotate to next key if available
+        if (hasMoreFactoryKeys() && attempt < maxAttempts) {
+          const rotated = rotateFactoryApiKey();
+          if (rotated) {
+            // Update the Authorization header with new key
+            const newAuthHeader = await getApiKey();
+            fetchOptions.headers.authorization = newAuthHeader;
+
+            logInfo(`Retrying ${endpointName} with fallback key...`);
+            attempt++;
+            continue; // Retry with new key
+          }
+        }
+
+        // No more keys to try, return the error response
+        logError(`All Factory API keys exhausted for ${endpointName}`, new Error('No more fallback keys available'));
+        return response;
+      }
+
+      // Success! Log if we're using a fallback key
+      const keyInfo2 = getCurrentKeyInfo();
+      if (keyInfo2 && keyInfo2.index > 1) {
+        console.log('\n' + '='.repeat(80));
+        console.log('✅ FALLBACK KEY SUCCESS');
+        console.log('='.repeat(80));
+        console.log(`Endpoint: ${endpointName}`);
+        console.log(`Active key: #${keyInfo2.index}/${keyInfo2.total}`);
+        console.log(`Status: ${response.status}`);
+        console.log('='.repeat(80) + '\n');
+      }
+
+      return response;
+
+    } catch (error) {
+      lastError = error;
+      logError(`Network error on attempt ${attempt}/${maxAttempts}`, error);
+
+      // Don't retry on network errors, just throw
+      throw error;
+    }
+  }
+
+  // Should not reach here, but just in case
+  throw lastError || new Error('Request failed after all attempts');
+}
 
 /**
  * Convert a /v1/responses API result to a /v1/chat/completions-compatible format.
@@ -159,16 +249,16 @@ async function handleChatCompletions(req, res) {
       fetchOptions.agent = proxyAgentInfo.agent;
     }
 
-    const response = await fetch(endpoint.base_url, fetchOptions);
+    const response = await fetchWithFallback(endpoint.base_url, fetchOptions, 'chat completions');
 
     logInfo(`Response status: ${response.status}`);
 
     if (!response.ok) {
       const errorText = await response.text();
       logError(`Endpoint error: ${response.status}`, new Error(errorText));
-      return res.status(response.status).json({ 
+      return res.status(response.status).json({
         error: `Endpoint returned ${response.status}`,
-        details: errorText 
+        details: errorText
       });
     }
 
@@ -336,16 +426,16 @@ async function handleDirectResponses(req, res) {
       fetchOptions.agent = proxyAgentInfo.agent;
     }
 
-    const response = await fetch(endpoint.base_url, fetchOptions);
+    const response = await fetchWithFallback(endpoint.base_url, fetchOptions, 'direct responses');
 
     logInfo(`Response status: ${response.status}`);
 
     if (!response.ok) {
       const errorText = await response.text();
       logError(`Endpoint error: ${response.status}`, new Error(errorText));
-      return res.status(response.status).json({ 
+      return res.status(response.status).json({
         error: `Endpoint returned ${response.status}`,
-        details: errorText 
+        details: errorText
       });
     }
 
@@ -493,16 +583,16 @@ async function handleDirectMessages(req, res) {
       fetchOptions.agent = proxyAgentInfo.agent;
     }
 
-    const response = await fetch(endpoint.base_url, fetchOptions);
+    const response = await fetchWithFallback(endpoint.base_url, fetchOptions, 'direct messages');
 
     logInfo(`Response status: ${response.status}`);
 
     if (!response.ok) {
       const errorText = await response.text();
       logError(`Endpoint error: ${response.status}`, new Error(errorText));
-      return res.status(response.status).json({ 
+      return res.status(response.status).json({
         error: `Endpoint returned ${response.status}`,
-        details: errorText 
+        details: errorText
       });
     }
 
@@ -611,7 +701,7 @@ async function handleCountTokens(req, res) {
       fetchOptions.agent = proxyAgentInfo.agent;
     }
 
-    const response = await fetch(countTokensUrl, fetchOptions);
+    const response = await fetchWithFallback(countTokensUrl, fetchOptions, 'count tokens');
 
     logInfo(`Response status: ${response.status}`);
 
