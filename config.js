@@ -43,8 +43,16 @@ export function isDevMode() {
 }
 
 export function getPort() {
+  // Prioritize environment variable (used by Render and other cloud platforms)
+  if (process.env.PORT) {
+    const envPort = parseInt(process.env.PORT, 10);
+    console.log(`[PORT] Using PORT from environment variable: ${envPort}`);
+    return envPort;
+  }
   const cfg = getConfig();
-  return cfg.port || 3000;
+  const configPort = cfg.port || 3000;
+  console.log(`[PORT] Using port from config: ${configPort}`);
+  return configPort;
 }
 
 export function getSystemPrompt() {
