@@ -29,6 +29,8 @@ app.get('/', (req, res) => {
     version: '1.0.0',
     description: 'OpenAI Compatible API Proxy',
     endpoints: [
+      'GET /health',
+      'GET /ping',
       'GET /v1/models',
       'POST /v1/chat/completions',
       'POST /v1/responses',
@@ -36,6 +38,49 @@ app.get('/', (req, res) => {
       'POST /v1/messages/count_tokens'
     ]
   });
+});
+
+// Health check endpoint for Uptime Robot
+app.get('/health', (req, res) => {
+  const timestamp = new Date().toISOString();
+  const userAgent = req.headers['user-agent'] || 'Unknown';
+
+  console.log('\n' + '='.repeat(80));
+  console.log('✅ Health Check Ping Received');
+  console.log('='.repeat(80));
+  console.log(`Timestamp: ${timestamp}`);
+  console.log(`User-Agent: ${userAgent}`);
+  console.log(`IP Address: ${req.ip || req.connection.remoteAddress}`);
+  console.log('='.repeat(80) + '\n');
+
+  logInfo('Health check endpoint pinged', {
+    timestamp,
+    userAgent,
+    ip: req.ip || req.connection.remoteAddress
+  });
+
+  res.status(200).json({
+    status: 'ok',
+    uptime: process.uptime(),
+    timestamp: timestamp,
+    service: 'droid2api'
+  });
+});
+
+// Alternative ping endpoint (commonly used by monitoring services)
+app.get('/ping', (req, res) => {
+  const timestamp = new Date().toISOString();
+
+  console.log('\n' + '='.repeat(80));
+  console.log('🏓 Ping Received');
+  console.log('='.repeat(80));
+  console.log(`Timestamp: ${timestamp}`);
+  console.log(`IP Address: ${req.ip || req.connection.remoteAddress}`);
+  console.log('='.repeat(80) + '\n');
+
+  logInfo('Ping endpoint accessed');
+
+  res.status(200).send('pong');
 });
 
 // 404 处理 - 捕获所有未匹配的路由
@@ -127,6 +172,8 @@ app.use((err, req, res, next) => {
     .on('listening', () => {
       logInfo(`Server running on http://localhost:${PORT}`);
       logInfo('Available endpoints:');
+      logInfo('  GET  /health (Uptime monitoring)');
+      logInfo('  GET  /ping (Uptime monitoring)');
       logInfo('  GET  /v1/models');
       logInfo('  POST /v1/chat/completions');
       logInfo('  POST /v1/responses');
