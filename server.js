@@ -166,11 +166,12 @@ app.use((err, req, res, next) => {
     await initializeAuth();
     
     const PORT = getPort();
-  logInfo(`Starting server on port ${PORT}...`);
-  
-  const server = app.listen(PORT)
+  const HOST = '0.0.0.0'; // Bind to all interfaces for cloud deployment
+  logInfo(`Starting server on ${HOST}:${PORT}...`);
+
+  const server = app.listen(PORT, HOST)
     .on('listening', () => {
-      logInfo(`Server running on http://localhost:${PORT}`);
+      logInfo(`Server running on http://${HOST}:${PORT}`);
       logInfo('Available endpoints:');
       logInfo('  GET  /health (Uptime monitoring)');
       logInfo('  GET  /ping (Uptime monitoring)');
