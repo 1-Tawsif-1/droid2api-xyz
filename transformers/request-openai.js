@@ -15,11 +15,11 @@ export function transformToOpenAI(openaiRequest) {
     targetRequest.stream = openaiRequest.stream;
   }
 
-  // Transform max_tokens to max_output_tokens
+  // Transform max_tokens to max_output_tokens (API requires >= 16)
   if (openaiRequest.max_tokens) {
-    targetRequest.max_output_tokens = openaiRequest.max_tokens;
+    targetRequest.max_output_tokens = Math.max(16, openaiRequest.max_tokens);
   } else if (openaiRequest.max_completion_tokens) {
-    targetRequest.max_output_tokens = openaiRequest.max_completion_tokens;
+    targetRequest.max_output_tokens = Math.max(16, openaiRequest.max_completion_tokens);
   }
 
   // Transform messages to input
