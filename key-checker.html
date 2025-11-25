@@ -141,6 +141,11 @@
       border: 2px solid rgba(255, 193, 7, 0.5);
     }
 
+    .result.inactive {
+      background: rgba(100, 100, 100, 0.15);
+      border: 2px solid rgba(100, 100, 100, 0.5);
+    }
+
     .result-header {
       display: flex;
       align-items: center;
@@ -176,6 +181,48 @@
       font-size: 12px;
     }
 
+    .status-card {
+      background: rgba(0, 0, 0, 0.2);
+      border-radius: 12px;
+      padding: 20px;
+      margin-top: 15px;
+    }
+
+    .status-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .status-row:last-child {
+      border-bottom: none;
+    }
+
+    .status-label {
+      color: rgba(255, 255, 255, 0.6);
+      font-size: 14px;
+    }
+
+    .status-value {
+      color: #fff;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .status-value.active {
+      color: #2ed573;
+    }
+
+    .status-value.inactive {
+      color: #ff4757;
+    }
+
+    .status-value.warning {
+      color: #ffc107;
+    }
+
     .loading {
       display: inline-block;
       width: 20px;
@@ -205,12 +252,19 @@
     .info-box strong {
       color: #4facfe;
     }
+
+    .inactive-message {
+      text-align: center;
+      color: rgba(255, 255, 255, 0.5);
+      font-size: 14px;
+      padding: 20px;
+    }
   </style>
 </head>
 <body>
   <div class="container">
     <h1>Factory API Key Checker</h1>
-    <p class="subtitle">Verify if your Factory API key is active and working</p>
+    <p class="subtitle">Check your Factory API key status</p>
 
     <div class="input-group">
       <label for="apiKey">Enter your Factory API Key</label>
@@ -230,8 +284,8 @@
     <div id="result" class="result"></div>
 
     <div class="info-box">
-      <strong>How it works:</strong> This tool sends a minimal test request to the Factory API
-      to verify if your key is valid and has available quota. No data is stored or logged.
+      <strong>How it works:</strong> This tool verifies if your Factory API key is active and working.
+      Token usage details are available in your Factory dashboard at <a href="https://app.factory.ai" target="_blank" style="color: #4facfe;">app.factory.ai</a>.
     </div>
   </div>
 
@@ -242,11 +296,10 @@
       const resultDiv = document.getElementById('result');
 
       if (!apiKey) {
-        showResult('warning', '⚠️', 'No Key Provided', 'Please enter a Factory API key to check.');
+        showResult('warning', '⚠️', 'No Key Provided', '<p>Please enter a Factory API key to check.</p>');
         return;
       }
 
-      // Show loading state
       btn.disabled = true;
       btn.innerHTML = '<span class="loading"></span>Checking...';
       resultDiv.className = 'result';
@@ -263,30 +316,52 @@
         const data = await response.json();
 
         if (data.status === 'active') {
-          showResult('success', '✅', 'Key is Active', `
-            <p>Your API key is <strong>valid and working</strong>.</p>
-            <p>Key prefix: <code>${data.keyPreview}</code></p>
-            ${data.model ? `<p>Tested with model: <code>${data.model}</code></p>` : ''}
+          showResult('success', '✅', 'Key Active', `
+            <div class="status-card">
+              <div class="status-row">
+                <span class="status-label">Status</span>
+                <span class="status-value active">Active</span>
+              </div>
+              <div class="status-row">
+                <span class="status-label">Key</span>
+                <span class="status-value">${data.keyPreview}</span>
+              </div>
+              <div class="status-row">
+                <span class="status-label">Token Usage</span>
+                <span class="status-value">Check <a href="https://app.factory.ai" target="_blank" style="color: #4facfe;">Factory Dashboard</a></span>
+              </div>
+            </div>
           `);
         } else if (data.status === 'quota_exceeded') {
-          showResult('error', '🚫', 'Quota Exceeded', `
-            <p>Your API key is valid but has <strong>exceeded its quota</strong>.</p>
-            <p>Key prefix: <code>${data.keyPreview}</code></p>
-            <p>Status code: <code>${data.statusCode}</code></p>
-            <p>Please check your billing or wait for quota reset.</p>
+          showResult('warning', '⚠️', 'Quota Exceeded', `
+            <div class="status-card">
+              <div class="status-row">
+                <span class="status-label">Status</span>
+                <span class="status-value warning">Quota Exceeded</span>
+              </div>
+              <div class="status-row">
+                <span class="status-label">Key</span>
+                <span class="status-value">${data.keyPreview}</span>
+              </div>
+              <div class="status-row">
+                <span class="status-label">Action Required</span>
+                <span class="status-value">Upgrade plan or wait for reset</span>
+              </div>
+            </div>
           `);
         } else if (data.status === 'invalid') {
-          showResult('error', '❌', 'Invalid Key', `
-            <p>Your API key is <strong>invalid or deactivated</strong>.</p>
-            <p>Key prefix: <code>${data.keyPreview}</code></p>
-            <p>Status code: <code>${data.statusCode}</code></p>
-            <p>Error: ${data.error || 'Authentication failed'}</p>
+          // For deactivated/invalid keys, show minimal info
+          showResult('inactive', '', '', `
+            <div class="inactive-message">
+              <p>This API key is inactive or invalid.</p>
+              <p style="margin-top: 10px; font-size: 12px; color: rgba(255,255,255,0.4);">No information available for this key.</p>
+            </div>
           `);
         } else {
-          showResult('warning', '⚠️', 'Unknown Status', `
-            <p>Could not determine key status.</p>
-            <p>Status code: <code>${data.statusCode}</code></p>
-            <p>Response: ${data.error || 'Unknown error'}</p>
+          showResult('inactive', '', '', `
+            <div class="inactive-message">
+              <p>Unable to verify this API key.</p>
+            </div>
           `);
         }
       } catch (error) {
@@ -303,16 +378,20 @@
     function showResult(type, icon, title, details) {
       const resultDiv = document.getElementById('result');
       resultDiv.className = `result show ${type}`;
-      resultDiv.innerHTML = `
-        <div class="result-header">
-          <span class="result-icon">${icon}</span>
-          <span class="result-title">${title}</span>
-        </div>
-        <div class="result-details">${details}</div>
-      `;
+      
+      if (icon && title) {
+        resultDiv.innerHTML = `
+          <div class="result-header">
+            <span class="result-icon">${icon}</span>
+            <span class="result-title">${title}</span>
+          </div>
+          <div class="result-details">${details}</div>
+        `;
+      } else {
+        resultDiv.innerHTML = `<div class="result-details">${details}</div>`;
+      }
     }
 
-    // Allow Enter key to trigger check
     document.getElementById('apiKey').addEventListener('keypress', function(e) {
       if (e.key === 'Enter') {
         checkKey();
