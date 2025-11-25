@@ -65,23 +65,38 @@ function generateClientId() {
  */
 function loadAuthConfig() {
   // 1. Check FACTORY_API_KEY environment variables (highest priority)
-  // Support FACTORY_API_KEY and FACTORY_API_KEY_2 for fallback
-  const factoryKey1 = process.env.FACTORY_API_KEY;
-  const factoryKey2 = process.env.FACTORY_API_KEY_2;
+  // Support FACTORY_API_KEY through FACTORY_API_KEY_7 for fallback (up to 7 keys)
+  const keyEnvNames = [
+    'FACTORY_API_KEY',
+    'FACTORY_API_KEY_2',
+    'FACTORY_API_KEY_3',
+    'FACTORY_API_KEY_4',
+    'FACTORY_API_KEY_5',
+    'FACTORY_API_KEY_6',
+    'FACTORY_API_KEY_7'
+  ];
 
-  if (factoryKey1 && factoryKey1.trim() !== '') {
-    factoryApiKeys.push(factoryKey1.trim());
-  }
-  if (factoryKey2 && factoryKey2.trim() !== '') {
-    factoryApiKeys.push(factoryKey2.trim());
+  for (const envName of keyEnvNames) {
+    const keyValue = process.env[envName];
+    if (keyValue && keyValue.trim() !== '') {
+      factoryApiKeys.push(keyValue.trim());
+    }
   }
 
   if (factoryApiKeys.length > 0) {
+    console.log('\n' + '='.repeat(80));
+    console.log('✅ FACTORY API KEYS LOADED SUCCESSFULLY');
+    console.log('='.repeat(80));
+    console.log(`Total keys loaded: ${factoryApiKeys.length}/7`);
+    console.log('Keys will be used as fallback one after another on quota/auth errors');
+    console.log('-'.repeat(80));
+    factoryApiKeys.forEach((key, index) => {
+      const envName = index === 0 ? 'FACTORY_API_KEY' : `FACTORY_API_KEY_${index + 1}`;
+      console.log(`  Key #${index + 1}: ${envName} (${key.substring(0, 15)}...)`);
+    });
+    console.log('='.repeat(80) + '\n');
+
     logInfo(`Loaded ${factoryApiKeys.length} Factory API key(s) for fallback support`);
-    logInfo(`Primary key: FACTORY_API_KEY (${factoryApiKeys[0].substring(0, 10)}...)`);
-    if (factoryApiKeys.length > 1) {
-      logInfo(`Fallback key: FACTORY_API_KEY_2 (${factoryApiKeys[1].substring(0, 10)}...)`);
-    }
     authSource = 'factory_key';
     currentKeyIndex = 0;
     return { type: 'factory_key', value: factoryApiKeys };

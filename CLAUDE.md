@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 droid2api is an OpenAI-compatible API proxy server that provides unified access to different LLM models (OpenAI, Anthropic, Google, etc.) through a standardized interface. It acts as a middleware layer that handles authentication, request transformation, response streaming, and reasoning level control.
 
+**Note:** This project uses ES modules (`"type": "module"` in package.json). Use `import`/`export` syntax, not `require()`.
+
 ## Development Commands
 
 ### Running the Server
@@ -74,6 +76,17 @@ curl http://localhost:3000/v1/chat/completions \
 - Supports authenticated proxies (http://user:pass@host:port)
 - Falls back to direct connection if no proxies configured
 
+**logger.js** - Structured logging utility
+- Provides logInfo, logDebug, logError, logRequest, logResponse functions
+- Debug logging controlled by dev_mode in config.json
+
+**transformers/** - Request/Response transformation modules
+- `request-anthropic.js` - Converts OpenAI format to Anthropic format
+- `request-openai.js` - Prepares requests for OpenAI endpoints
+- `request-common.js` - Generic transformation for other providers
+- `response-anthropic.js` - Converts Anthropic streaming responses to OpenAI format
+- `response-openai.js` - Converts OpenAI /v1/responses format to chat completions
+
 ### Request Transformation Flow
 
 1. Client sends request to `/v1/chat/completions`
@@ -135,10 +148,15 @@ Three methods (in priority order):
 1. **Fixed API Key with Fallback Support** (highest priority)
    ```bash
    export FACTORY_API_KEY="your_primary_key"
-   export FACTORY_API_KEY_2="your_fallback_key"  # Optional
+   export FACTORY_API_KEY_2="your_fallback_key_2"  # Optional
+   export FACTORY_API_KEY_3="your_fallback_key_3"  # Optional
+   export FACTORY_API_KEY_4="your_fallback_key_4"  # Optional
+   export FACTORY_API_KEY_5="your_fallback_key_5"  # Optional
+   export FACTORY_API_KEY_6="your_fallback_key_6"  # Optional
+   export FACTORY_API_KEY_7="your_fallback_key_7"  # Optional
    ```
-   - Supports up to 2 Factory API keys for automatic fallback
-   - When primary key fails (quota/auth error), automatically rotates to fallback key
+   - Supports up to 7 Factory API keys for automatic fallback
+   - When primary key fails (quota/auth error), automatically rotates to next key
    - Detailed logging shows which key is active and when rotation occurs
    - Status codes triggering fallback: 429 (quota), 401/403 (auth), 402 (payment)
 
@@ -160,13 +178,31 @@ Three methods (in priority order):
 ## Key Implementation Details
 
 ### Factory API Key Fallback System
-The system supports automatic failover between multiple Factory API keys:
-- **Load Phase**: Reads FACTORY_API_KEY and FACTORY_API_KEY_2 from environment
+The system supports automatic failover between multiple Factory API keys (up to 7):
+- **Load Phase**: Reads FACTORY_API_KEY through FACTORY_API_KEY_7 from environment
 - **Detection**: Monitors response status codes (429, 401, 403, 402) indicating quota/auth failures
 - **Rotation**: Automatically switches to next available key when current key fails
 - **Logging**: Detailed console output shows key rotation events with timestamps
-- **Retry Logic**: Retries failed request with new key immediately (max 2 attempts)
+- **Retry Logic**: Retries failed request with new key immediately (max 2 attempts per rotation)
 - **Persistence**: Current key index maintained in memory (resets on server restart)
+
+Example log output on startup:
+```
+================================================================================
+✅ FACTORY API KEYS LOADED SUCCESSFULLY
+================================================================================
+Total keys loaded: 7/7
+Keys will be used as fallback one after another on quota/auth errors
+--------------------------------------------------------------------------------
+  Key #1: FACTORY_API_KEY (fk-US31AJQaqUu0...)
+  Key #2: FACTORY_API_KEY_2 (fk-cf5u10QZaZzn...)
+  Key #3: FACTORY_API_KEY_3 (fk-93NNcgMm3vg6...)
+  Key #4: FACTORY_API_KEY_4 (fk-0KhK1ycmkumb...)
+  Key #5: FACTORY_API_KEY_5 (fk-4bGGvtKADKEd...)
+  Key #6: FACTORY_API_KEY_6 (fk-25zdmurIxwg2...)
+  Key #7: FACTORY_API_KEY_7 (fk-xxxxxxxx...)
+================================================================================
+```
 
 Example log output when fallback occurs:
 ```
@@ -225,4 +261,9 @@ Edit config.json and add to the models array:
 }
 ```
 
-The `type` field determines which endpoint and transformer to use. The `provider` field sets the x-api-provider header for Factory API routing.
+The `type` field determines which endpoint and transformer to use:
+- **anthropic**: For Claude models - uses Anthropic Messages API format
+- **openai**: For GPT models - uses OpenAI Responses API format
+- **common**: For other providers (Google, Fireworks) - uses standard chat completions format with raw stream forwarding
+
+The `provider` field sets the x-api-provider header for Factory API routing.
