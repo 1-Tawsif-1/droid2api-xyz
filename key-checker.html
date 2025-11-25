@@ -316,6 +316,71 @@
         const data = await response.json();
 
         if (data.status === 'active') {
+          let usageHtml = '';
+          
+          // Check if we have usage info from the API response
+          if (data.usage) {
+            usageHtml = `
+              <div class="status-row">
+                <span class="status-label">Input Tokens</span>
+                <span class="status-value">${data.usage.input_tokens?.toLocaleString() || 'N/A'}</span>
+              </div>
+              <div class="status-row">
+                <span class="status-label">Output Tokens</span>
+                <span class="status-value">${data.usage.output_tokens?.toLocaleString() || 'N/A'}</span>
+              </div>
+            `;
+          }
+          
+          // Check if we have usage info from the usage endpoint
+          if (data.usageInfo) {
+            const info = data.usageInfo;
+            if (info.tokens_used !== undefined || info.tokens_remaining !== undefined || info.total_tokens !== undefined) {
+              usageHtml = `
+                ${info.total_tokens !== undefined ? `
+                <div class="status-row">
+                  <span class="status-label">Total Tokens</span>
+                  <span class="status-value">${info.total_tokens.toLocaleString()}</span>
+                </div>` : ''}
+                ${info.tokens_used !== undefined ? `
+                <div class="status-row">
+                  <span class="status-label">Tokens Used</span>
+                  <span class="status-value">${info.tokens_used.toLocaleString()}</span>
+                </div>` : ''}
+                ${info.tokens_remaining !== undefined ? `
+                <div class="status-row">
+                  <span class="status-label">Tokens Remaining</span>
+                  <span class="status-value">${info.tokens_remaining.toLocaleString()}</span>
+                </div>` : ''}
+              `;
+            }
+          }
+          
+          // Check rate limit headers
+          if (data.usageHeaders) {
+            const headers = data.usageHeaders;
+            for (const [key, value] of Object.entries(headers)) {
+              if (key.toLowerCase().includes('remaining') || key.toLowerCase().includes('limit')) {
+                usageHtml += `
+                  <div class="status-row">
+                    <span class="status-label">${key.replace(/^x-/i, '').replace(/-/g, ' ')}</span>
+                    <span class="status-value">${value}</span>
+                  </div>
+                `;
+              }
+            }
+          }
+          
+          // If no usage info, show link to dashboard
+          if (!usageHtml) {
+            usageHtml = `
+              <div class="status-row">
+                <span class="status-label">Token Usage</span>
+                <span class="status-value">Check <a href="https://app.factory.ai" target="_blank" style="color: #4facfe;">Factory Dashboard</a></span>
+              </div>
+            `;
+          }
+          
           showResult('success', '✅', 'Key Active', `
             <div class="status-card">
               <div class="status-row">
@@ -326,10 +391,7 @@
                 <span class="status-label">Key</span>
                 <span class="status-value">${data.keyPreview}</span>
               </div>
-              <div class="status-row">
-                <span class="status-label">Token Usage</span>
-                <span class="status-value">Check <a href="https://app.factory.ai" target="_blank" style="color: #4facfe;">Factory Dashboard</a></span>
-              </div>
+              ${usageHtml}
             </div>
           `);
         } else if (data.status === 'quota_exceeded') {

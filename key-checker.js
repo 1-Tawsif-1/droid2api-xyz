@@ -16,6 +16,8 @@ const router = express.Router();
 
 // Test endpoint URL (using Anthropic messages endpoint for minimal test)
 const TEST_URL = 'https://api.factory.ai/api/llm/a/v1/messages';
+// Usage endpoint (Factory API usage info)
+const USAGE_URL = 'https://api.factory.ai/api/usage';
 
 /**
  * Serve the key checker HTML page
@@ -23,6 +25,52 @@ const TEST_URL = 'https://api.factory.ai/api/llm/a/v1/messages';
 router.get('/key-checker', (req, res) => {
   res.sendFile(path.join(__dirname, 'key-checker.html'));
 });
+
+/**
+ * Extract usage-related headers from response
+ */
+function extractUsageHeaders(headers) {
+  const usageInfo = {};
+  const headerPrefixes = ['x-ratelimit', 'x-usage', 'x-quota', 'x-tokens', 'ratelimit'];
+  
+  headers.forEach((value, key) => {
+    const lowerKey = key.toLowerCase();
+    if (headerPrefixes.some(prefix => lowerKey.includes(prefix))) {
+      usageInfo[key] = value;
+    }
+  });
+  
+  return Object.keys(usageInfo).length > 0 ? usageInfo : null;
+}
+
+/**
+ * Try to get usage information from Factory API
+ */
+async function tryGetUsage(apiKey, proxyAgentInfo) {
+  try {
+    const fetchOptions = {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      }
+    };
+    
+    if (proxyAgentInfo?.agent) {
+      fetchOptions.agent = proxyAgentInfo.agent;
+    }
+    
+    const response = await fetch(USAGE_URL, fetchOptions);
+    
+    if (response.ok) {
+      const data = await response.json();
+      return data;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * API endpoint to check if a key is valid
@@ -67,15 +115,27 @@ router.post('/check-key', async (req, res) => {
 
     const response = await fetch(TEST_URL, fetchOptions);
     const statusCode = response.status;
+    
+    // Extract any usage-related headers
+    const usageHeaders = extractUsageHeaders(response.headers);
 
     // Determine key status based on response
     if (statusCode === 200) {
-      // Key is valid and working
+      // Parse response to get usage info if available
+      const responseData = await response.json();
+      const usage = responseData.usage || null;
+      
+      // Try to get additional usage info from usage endpoint
+      const usageInfo = await tryGetUsage(apiKey, proxyAgentInfo);
+      
       return res.json({
         status: 'active',
         statusCode,
         keyPreview,
-        model: 'claude-sonnet-4-5-20250929'
+        model: 'claude-sonnet-4-5-20250929',
+        usage,
+        usageHeaders,
+        usageInfo
       });
     } else if (statusCode === 429) {
       // Quota exceeded
@@ -83,16 +143,15 @@ router.post('/check-key', async (req, res) => {
         status: 'quota_exceeded',
         statusCode,
         keyPreview,
-        error: 'Rate limit or quota exceeded'
+        error: 'Rate limit or quota exceeded',
+        usageHeaders
       });
     } else if (statusCode === 401 || statusCode === 403) {
       // Invalid or deactivated key
-      const errorText = await response.text();
       return res.json({
         status: 'invalid',
         statusCode,
-        keyPreview,
-        error: errorText.substring(0, 200)
+        keyPreview
       });
     } else if (statusCode === 402) {
       // Payment required
@@ -100,7 +159,8 @@ router.post('/check-key', async (req, res) => {
         status: 'quota_exceeded',
         statusCode,
         keyPreview,
-        error: 'Payment required - billing issue'
+        error: 'Payment required - billing issue',
+        usageHeaders
       });
     } else {
       // Other status
