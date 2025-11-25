@@ -397,6 +397,12 @@ async function handleDirectResponses(req, res) {
       }
     }
 
+    // Enforce minimum max_output_tokens (API requires >= 16)
+    if (typeof modifiedRequest.max_output_tokens === 'number' && modifiedRequest.max_output_tokens < 16) {
+      logInfo(`Adjusting max_output_tokens from ${modifiedRequest.max_output_tokens} to 16 (API minimum)`);
+      modifiedRequest.max_output_tokens = 16;
+    }
+
     // 处理reasoning字段
     const reasoningLevel = getModelReasoning(modelId);
     if (reasoningLevel === 'auto') {
