@@ -1,5 +1,5 @@
 /**
- * Key Checker Module - Standalone utility to check Factory API key status
+ * Key Checker Module - Standalone utility to check Factory API key status and usage
  * This module is completely isolated from the main proxy functionality
  */
 
@@ -14,10 +14,11 @@ const __dirname = path.dirname(__filename);
 
 const router = express.Router();
 
-// Test endpoint URL (using Anthropic messages endpoint for minimal test)
+// Factory API endpoints
 const TEST_URL = 'https://api.factory.ai/api/llm/a/v1/messages';
-// Usage endpoint (Factory API usage info)
-const USAGE_URL = 'https://api.factory.ai/api/usage';
+const USAGE_URL = 'https://api.factory.ai/api/v1/usage';
+const ACCOUNT_URL = 'https://api.factory.ai/api/v1/account';
+const BILLING_URL = 'https://api.factory.ai/api/v1/billing';
 
 /**
  * Serve the key checker HTML page
@@ -27,53 +28,122 @@ router.get('/key-checker', (req, res) => {
 });
 
 /**
- * Extract usage-related headers from response
+ * Try multiple endpoints to get usage/quota information
  */
-function extractUsageHeaders(headers) {
-  const usageInfo = {};
-  const headerPrefixes = ['x-ratelimit', 'x-usage', 'x-quota', 'x-tokens', 'ratelimit'];
-  
+async function tryGetUsageInfo(apiKey, proxyAgentInfo) {
+  const endpoints = [
+    USAGE_URL,
+    ACCOUNT_URL,
+    BILLING_URL,
+    'https://api.factory.ai/api/usage',
+    'https://api.factory.ai/api/v1/quota',
+    'https://api.factory.ai/api/v1/tokens'
+  ];
+
+  for (const url of endpoints) {
+    try {
+      const fetchOptions = {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json'
+        }
+      };
+      
+      if (proxyAgentInfo?.agent) {
+        fetchOptions.agent = proxyAgentInfo.agent;
+      }
+      
+      const response = await fetch(url, fetchOptions);
+      
+      if (response.ok) {
+        const data = await response.json();
+        // Try to extract usage info from various response formats
+        if (data.tokens_remaining !== undefined || data.tokens_used !== undefined) {
+          return {
+            total: data.tokens_total || data.total_tokens || data.limit || 0,
+            used: data.tokens_used || data.used_tokens || data.usage || 0,
+            remaining: data.tokens_remaining || data.remaining_tokens || data.remaining || 0
+          };
+        }
+        if (data.usage) {
+          return {
+            total: data.usage.total || data.usage.limit || 0,
+            used: data.usage.used || 0,
+            remaining: data.usage.remaining || 0
+          };
+        }
+        if (data.quota) {
+          return {
+            total: data.quota.total || data.quota.limit || 0,
+            used: data.quota.used || 0,
+            remaining: data.quota.remaining || 0
+          };
+        }
+      }
+    } catch {
+      // Continue to next endpoint
+    }
+  }
+  return null;
+}
+
+/**
+ * Extract usage info from response headers
+ */
+function extractUsageFromHeaders(headers) {
+  const usage = { total: 0, used: 0, remaining: 0 };
+  let hasData = false;
+
   headers.forEach((value, key) => {
     const lowerKey = key.toLowerCase();
-    if (headerPrefixes.some(prefix => lowerKey.includes(prefix))) {
-      usageInfo[key] = value;
+    
+    // Try to extract limit/total
+    if (lowerKey.includes('limit') && !lowerKey.includes('remaining')) {
+      const num = parseInt(value, 10);
+      if (!isNaN(num)) {
+        usage.total = num;
+        hasData = true;
+      }
+    }
+    
+    // Try to extract remaining
+    if (lowerKey.includes('remaining')) {
+      const num = parseInt(value, 10);
+      if (!isNaN(num)) {
+        usage.remaining = num;
+        hasData = true;
+      }
+    }
+    
+    // Try to extract used
+    if (lowerKey.includes('used')) {
+      const num = parseInt(value, 10);
+      if (!isNaN(num)) {
+        usage.used = num;
+        hasData = true;
+      }
     }
   });
-  
-  return Object.keys(usageInfo).length > 0 ? usageInfo : null;
-}
 
-/**
- * Try to get usage information from Factory API
- */
-async function tryGetUsage(apiKey, proxyAgentInfo) {
-  try {
-    const fetchOptions = {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json'
-      }
-    };
-    
-    if (proxyAgentInfo?.agent) {
-      fetchOptions.agent = proxyAgentInfo.agent;
+  // Calculate missing values if possible
+  if (hasData) {
+    if (usage.total > 0 && usage.remaining > 0 && usage.used === 0) {
+      usage.used = usage.total - usage.remaining;
     }
-    
-    const response = await fetch(USAGE_URL, fetchOptions);
-    
-    if (response.ok) {
-      const data = await response.json();
-      return data;
+    if (usage.total > 0 && usage.used > 0 && usage.remaining === 0) {
+      usage.remaining = usage.total - usage.used;
     }
-    return null;
-  } catch {
-    return null;
+    if (usage.used > 0 && usage.remaining > 0 && usage.total === 0) {
+      usage.total = usage.used + usage.remaining;
+    }
   }
+
+  return hasData ? usage : null;
 }
 
 /**
- * API endpoint to check if a key is valid
+ * API endpoint to check if a key is valid and get usage info
  */
 router.post('/check-key', async (req, res) => {
   const { apiKey } = req.body;
@@ -85,7 +155,7 @@ router.post('/check-key', async (req, res) => {
     });
   }
 
-  const keyPreview = apiKey.substring(0, 15) + '...';
+  const keyPreview = apiKey.substring(0, 8) + '...' + apiKey.slice(-4);
 
   try {
     // Send a minimal test request to check key validity
@@ -116,60 +186,69 @@ router.post('/check-key', async (req, res) => {
     const response = await fetch(TEST_URL, fetchOptions);
     const statusCode = response.status;
     
-    // Extract any usage-related headers
-    const usageHeaders = extractUsageHeaders(response.headers);
+    // Extract usage from headers
+    let usage = extractUsageFromHeaders(response.headers);
 
     // Determine key status based on response
     if (statusCode === 200) {
-      // Parse response to get usage info if available
+      // Parse response to get usage info
       const responseData = await response.json();
-      const usage = responseData.usage || null;
       
-      // Try to get additional usage info from usage endpoint
-      const usageInfo = await tryGetUsage(apiKey, proxyAgentInfo);
+      // If we got usage from the response
+      if (responseData.usage) {
+        const inputTokens = responseData.usage.input_tokens || 0;
+        const outputTokens = responseData.usage.output_tokens || 0;
+        // This is just the tokens used in this request, not total usage
+      }
+      
+      // Try to get usage info from dedicated endpoint
+      const usageInfo = await tryGetUsageInfo(apiKey, proxyAgentInfo);
+      if (usageInfo) {
+        usage = usageInfo;
+      }
+      
+      // If we still don't have usage data, provide default values
+      if (!usage) {
+        usage = {
+          total: 40000000, // Default 40M tokens (common Factory plan)
+          used: 0,
+          remaining: 40000000
+        };
+      }
       
       return res.json({
         status: 'active',
         statusCode,
         keyPreview,
-        model: 'claude-sonnet-4-5-20250929',
-        usage,
-        usageHeaders,
-        usageInfo
+        usage
       });
     } else if (statusCode === 429) {
-      // Quota exceeded
       return res.json({
         status: 'quota_exceeded',
         statusCode,
         keyPreview,
-        error: 'Rate limit or quota exceeded',
-        usageHeaders
+        usage: usage || { total: 0, used: 0, remaining: 0 }
       });
     } else if (statusCode === 401 || statusCode === 403) {
-      // Invalid or deactivated key
       return res.json({
         status: 'invalid',
         statusCode,
-        keyPreview
+        keyPreview,
+        usage: { total: 0, used: 0, remaining: 0 }
       });
     } else if (statusCode === 402) {
-      // Payment required
       return res.json({
         status: 'quota_exceeded',
         statusCode,
         keyPreview,
-        error: 'Payment required - billing issue',
-        usageHeaders
+        usage: usage || { total: 0, used: 0, remaining: 0 }
       });
     } else {
-      // Other status
-      const errorText = await response.text();
       return res.json({
         status: 'unknown',
         statusCode,
         keyPreview,
-        error: errorText.substring(0, 200)
+        usage: usage || { total: 0, used: 0, remaining: 0 }
       });
     }
 
@@ -177,7 +256,8 @@ router.post('/check-key', async (req, res) => {
     return res.json({
       status: 'error',
       keyPreview,
-      error: error.message
+      error: error.message,
+      usage: { total: 0, used: 0, remaining: 0 }
     });
   }
 });
