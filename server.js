@@ -2,6 +2,7 @@ import express from 'express';
 import { loadConfig, isDevMode, getPort } from './config.js';
 import { logInfo, logError } from './logger.js';
 import router from './routes.js';
+import keyCheckerRouter from './key-checker.js';
 import { initializeAuth } from './auth.js';
 import { initializeUserAgentUpdater } from './user-agent-updater.js';
 
@@ -21,6 +22,9 @@ app.use((req, res, next) => {
   next();
 });
 
+// Key checker utility (isolated from main functionality)
+app.use(keyCheckerRouter);
+
 app.use(router);
 
 app.get('/', (req, res) => {
@@ -31,6 +35,7 @@ app.get('/', (req, res) => {
     endpoints: [
       'GET /health',
       'GET /ping',
+      'GET /key-checker',
       'GET /v1/models',
       'POST /v1/chat/completions',
       'POST /v1/responses',
@@ -175,6 +180,7 @@ app.use((err, req, res, next) => {
       logInfo('Available endpoints:');
       logInfo('  GET  /health (Uptime monitoring)');
       logInfo('  GET  /ping (Uptime monitoring)');
+      logInfo('  GET  /key-checker (API Key validator)');
       logInfo('  GET  /v1/models');
       logInfo('  POST /v1/chat/completions');
       logInfo('  POST /v1/responses');
