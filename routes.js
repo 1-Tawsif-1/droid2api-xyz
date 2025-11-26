@@ -227,18 +227,28 @@ async function handleChatCompletions(req, res) {
     // Get provider from model config
     const provider = getModelProvider(modelId);
 
-    if (model.type === 'anthropic') {
-      transformedRequest = transformToAnthropic(requestWithRedirectedModel);
-      const isStreaming = openaiRequest.stream === true;
-      headers = getAnthropicHeaders(authHeader, clientHeaders, isStreaming, modelId, provider);
-    } else if (model.type === 'openai') {
-      transformedRequest = transformToOpenAI(requestWithRedirectedModel);
-      headers = getOpenAIHeaders(authHeader, clientHeaders, provider);
-    } else if (model.type === 'common') {
-      transformedRequest = transformToCommon(requestWithRedirectedModel);
-      headers = getCommonHeaders(authHeader, clientHeaders, provider);
-    } else {
-      return res.status(500).json({ error: `Unknown endpoint type: ${model.type}` });
+    try {
+      if (model.type === 'anthropic') {
+        transformedRequest = transformToAnthropic(requestWithRedirectedModel);
+        const isStreaming = openaiRequest.stream === true;
+        headers = getAnthropicHeaders(authHeader, clientHeaders, isStreaming, modelId, provider);
+      } else if (model.type === 'openai') {
+        transformedRequest = transformToOpenAI(requestWithRedirectedModel);
+        headers = getOpenAIHeaders(authHeader, clientHeaders, provider);
+      } else if (model.type === 'common') {
+        transformedRequest = transformToCommon(requestWithRedirectedModel);
+        headers = getCommonHeaders(authHeader, clientHeaders, provider);
+      } else {
+        return res.status(500).json({ error: `Unknown endpoint type: ${model.type}` });
+      }
+    } catch (transformError) {
+      logError('Request transformation failed', transformError);
+      return res.status(500).json({
+        error: 'Request transformation failed',
+        message: transformError.message,
+        phase: 'request_transform',
+        modelType: model.type
+      });
     }
 
     logRequest('POST', endpoint.base_url, headers, transformedRequest);
@@ -302,7 +312,15 @@ async function handleChatCompletions(req, res) {
           res.end();
           logInfo('Stream completed');
         } catch (streamError) {
-          logError('Stream error', streamError);
+          logError('Stream transformation error', streamError);
+          // Send error as SSE event so client can see it
+          const errorEvent = `data: ${JSON.stringify({
+            error: true,
+            message: streamError.message,
+            phase: 'response_stream_transform',
+            errorType: streamError.constructor.name
+          })}\n\n`;
+          res.write(errorEvent);
           res.end();
         }
       }
@@ -329,7 +347,12 @@ async function handleChatCompletions(req, res) {
     logError('Error in /v1/chat/completions', error);
     res.status(500).json({ 
       error: 'Internal server error',
-      message: error.message 
+      message: error.message,
+      stack: error.stack?.split('\n').slice(0, 5).join('\n'),
+      debug: {
+        errorType: error.constructor.name,
+        errorDetails: error.toString()
+      }
     });
   }
 }
