@@ -27,9 +27,11 @@ export function transformToOpenAI(openaiRequest) {
     for (const msg of openaiRequest.messages) {
       // Handle tool result messages (role: "tool")
       if (msg.role === 'tool') {
+        // Convert call_xxx to fc_xxx format for Factory API
+        const callId = msg.tool_call_id?.replace(/^call_/, 'fc_') || msg.tool_call_id;
         const toolResultItem = {
           type: 'function_call_output',
-          call_id: msg.tool_call_id,
+          call_id: callId,
           output: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)
         };
         targetRequest.input.push(toolResultItem);
@@ -54,10 +56,12 @@ export function transformToOpenAI(openaiRequest) {
         
         // Then add each tool call as a function_call item
         for (const toolCall of msg.tool_calls) {
+          // Convert call_xxx to fc_xxx format for Factory API
+          const callId = toolCall.id?.replace(/^call_/, 'fc_') || toolCall.id;
           const functionCallItem = {
             type: 'function_call',
-            id: toolCall.id,
-            call_id: toolCall.id,
+            id: callId,
+            call_id: callId,
             name: toolCall.function?.name || '',
             arguments: toolCall.function?.arguments || '{}'
           };
