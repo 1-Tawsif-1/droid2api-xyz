@@ -243,11 +243,13 @@ async function handleChatCompletions(req, res) {
       }
     } catch (transformError) {
       logError('Request transformation failed', transformError);
+      const debugInfo = `[TRANSFORM_ERROR] ${transformError.message} | Type: ${model.type} | Stack: ${transformError.stack?.split('\n').slice(1, 2).join('')}`;
       return res.status(500).json({
-        error: 'Request transformation failed',
-        message: transformError.message,
-        phase: 'request_transform',
-        modelType: model.type
+        error: {
+          message: debugInfo,
+          type: 'transform_error',
+          code: 'request_transform_failed'
+        }
       });
     }
 
@@ -345,13 +347,12 @@ async function handleChatCompletions(req, res) {
 
   } catch (error) {
     logError('Error in /v1/chat/completions', error);
+    const debugInfo = `[${error.constructor.name}] ${error.message} | Stack: ${error.stack?.split('\n').slice(1, 3).join(' -> ')}`;
     res.status(500).json({ 
-      error: 'Internal server error',
-      message: error.message,
-      stack: error.stack?.split('\n').slice(0, 5).join('\n'),
-      debug: {
-        errorType: error.constructor.name,
-        errorDetails: error.toString()
+      error: {
+        message: debugInfo,
+        type: 'proxy_error',
+        code: 'internal_error'
       }
     });
   }
