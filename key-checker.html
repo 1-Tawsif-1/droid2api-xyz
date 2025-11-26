@@ -205,6 +205,22 @@
       color: #856404;
     }
 
+    .key-badge.restricted {
+      background: #e2e3f5;
+      color: #383d8a;
+    }
+
+    .key-badge.unknown {
+      background: #e9ecef;
+      color: #495057;
+    }
+
+    .status-message {
+      font-size: 11px;
+      color: #666;
+      margin-top: 4px;
+    }
+
     .progress-bar {
       width: 100%;
       height: 8px;
@@ -393,7 +409,8 @@
       let totalRemaining = 0;
 
       keys.forEach(key => {
-        if (key.status === 'active' && key.usage) {
+        // Count active and restricted keys in stats (restricted keys may still be usable)
+        if ((key.status === 'active' || key.status === 'restricted') && key.usage) {
           totalAllowance += key.usage.total || 0;
           totalUsed += key.usage.used || 0;
           totalRemaining += key.usage.remaining || 0;
@@ -441,19 +458,31 @@
         const percentage = total > 0 ? ((used / total) * 100).toFixed(2) : 0;
         
         let statusBadge = '';
+        let statusMessage = key.message || '';
         if (key.status === 'active') {
           statusBadge = '<span class="key-badge active">Active</span>';
         } else if (key.status === 'quota_exceeded') {
           statusBadge = '<span class="key-badge quota">Quota Exceeded</span>';
+        } else if (key.status === 'restricted') {
+          statusBadge = '<span class="key-badge restricted">Restricted</span>';
+        } else if (key.status === 'invalid') {
+          statusBadge = '<span class="key-badge inactive">Invalid</span>';
+        } else if (key.status === 'unknown') {
+          statusBadge = '<span class="key-badge unknown">Unknown</span>';
+        } else if (key.status === 'error') {
+          statusBadge = '<span class="key-badge inactive">Error</span>';
         } else {
-          statusBadge = '<span class="key-badge inactive">Inactive</span>';
+          statusBadge = '<span class="key-badge unknown">Unknown</span>';
         }
 
         return `
           <tr>
             <td>key-${index + 1}</td>
             <td>${key.preview}</td>
-            <td>${statusBadge}</td>
+            <td>
+              ${statusBadge}
+              ${statusMessage ? `<div class="status-message">${statusMessage}</div>` : ''}
+            </td>
             <td>${formatNumber(total)}</td>
             <td>${formatNumber(used)}</td>
             <td>${formatNumber(remaining)}</td>
@@ -515,6 +544,7 @@
           preview: result.keyPreview || apiKey.substring(0, 8) + '...' + apiKey.slice(-4),
           status: result.status,
           usage: result.usage || { total: 0, used: 0, remaining: 0 },
+          message: result.message || '',
           checkedAt: new Date().toISOString()
         };
 
@@ -541,6 +571,7 @@
           const result = await checkKey(keys[i].key);
           keys[i].status = result.status;
           keys[i].usage = result.usage || keys[i].usage;
+          keys[i].message = result.message || '';
           keys[i].checkedAt = new Date().toISOString();
         }
         saveKeys();

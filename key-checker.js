@@ -143,6 +143,49 @@ function extractUsageFromHeaders(headers) {
 }
 
 /**
+ * Analyze error response to determine true key status
+ */
+function analyzeErrorResponse(statusCode, errorData) {
+  const errorMessage = (errorData?.error?.message || errorData?.detail || errorData?.message || '').toLowerCase();
+  const errorTitle = (errorData?.title || '').toLowerCase();
+  
+  // Check for specific error patterns
+  if (errorMessage.includes('invalid api key') || 
+      errorMessage.includes('invalid_api_key') ||
+      errorMessage.includes('api key not found') ||
+      errorMessage.includes('authentication failed') ||
+      errorMessage.includes('unauthorized')) {
+    return { status: 'invalid', message: 'Invalid or deactivated API key' };
+  }
+  
+  if (errorMessage.includes('quota') || 
+      errorMessage.includes('rate limit') ||
+      errorMessage.includes('exceeded') ||
+      errorMessage.includes('billing') ||
+      errorMessage.includes('reload your tokens') ||
+      errorTitle.includes('payment required')) {
+    return { status: 'quota_exceeded', message: 'Quota exceeded or payment required' };
+  }
+  
+  if (errorMessage.includes('forbidden') && !errorMessage.includes('api key')) {
+    // 403 Forbidden but not about API key - might be model access or other restriction
+    return { status: 'restricted', message: 'Key valid but access restricted' };
+  }
+  
+  if (statusCode === 400) {
+    // Bad request usually means key is valid but request format was wrong
+    return { status: 'active', message: 'Key appears valid (request format error)' };
+  }
+  
+  if (statusCode === 404) {
+    // Model not found - key is likely valid
+    return { status: 'active', message: 'Key appears valid (model not found)' };
+  }
+  
+  return null; // Unknown, use default logic
+}
+
+/**
  * API endpoint to check if a key is valid and get usage info
  */
 router.post('/check-key', async (req, res) => {
@@ -188,19 +231,17 @@ router.post('/check-key', async (req, res) => {
     
     // Extract usage from headers
     let usage = extractUsageFromHeaders(response.headers);
+    
+    // Get response body for error analysis
+    let responseData = null;
+    try {
+      responseData = await response.json();
+    } catch {
+      // Response might not be JSON
+    }
 
     // Determine key status based on response
     if (statusCode === 200) {
-      // Parse response to get usage info
-      const responseData = await response.json();
-      
-      // If we got usage from the response
-      if (responseData.usage) {
-        const inputTokens = responseData.usage.input_tokens || 0;
-        const outputTokens = responseData.usage.output_tokens || 0;
-        // This is just the tokens used in this request, not total usage
-      }
-      
       // Try to get usage info from dedicated endpoint
       const usageInfo = await tryGetUsageInfo(apiKey, proxyAgentInfo);
       if (usageInfo) {
@@ -220,44 +261,117 @@ router.post('/check-key', async (req, res) => {
         status: 'active',
         statusCode,
         keyPreview,
-        usage
+        usage,
+        message: 'Key is active and working'
       });
-    } else if (statusCode === 429) {
+    }
+    
+    // Analyze error response for non-200 status codes
+    const errorAnalysis = analyzeErrorResponse(statusCode, responseData);
+    
+    if (errorAnalysis) {
+      // Use analyzed status
+      if (errorAnalysis.status === 'active') {
+        // Key seems valid even though request failed
+        const usageInfo = await tryGetUsageInfo(apiKey, proxyAgentInfo);
+        return res.json({
+          status: 'active',
+          statusCode,
+          keyPreview,
+          usage: usageInfo || usage || { total: 40000000, used: 0, remaining: 40000000 },
+          message: errorAnalysis.message
+        });
+      }
+      
+      if (errorAnalysis.status === 'restricted') {
+        return res.json({
+          status: 'restricted',
+          statusCode,
+          keyPreview,
+          usage: usage || { total: 0, used: 0, remaining: 0 },
+          message: errorAnalysis.message
+        });
+      }
+      
+      if (errorAnalysis.status === 'quota_exceeded') {
+        return res.json({
+          status: 'quota_exceeded',
+          statusCode,
+          keyPreview,
+          usage: usage || { total: 0, used: 0, remaining: 0 },
+          message: errorAnalysis.message
+        });
+      }
+      
+      if (errorAnalysis.status === 'invalid') {
+        return res.json({
+          status: 'invalid',
+          statusCode,
+          keyPreview,
+          usage: { total: 0, used: 0, remaining: 0 },
+          message: errorAnalysis.message
+        });
+      }
+    }
+    
+    // Default handling for status codes without specific error analysis
+    if (statusCode === 429) {
       return res.json({
         status: 'quota_exceeded',
         statusCode,
         keyPreview,
-        usage: usage || { total: 0, used: 0, remaining: 0 }
+        usage: usage || { total: 0, used: 0, remaining: 0 },
+        message: 'Rate limited or quota exceeded'
       });
-    } else if (statusCode === 401 || statusCode === 403) {
+    }
+    
+    if (statusCode === 402) {
+      return res.json({
+        status: 'quota_exceeded',
+        statusCode,
+        keyPreview,
+        usage: usage || { total: 0, used: 0, remaining: 0 },
+        message: 'Payment required - reload tokens'
+      });
+    }
+    
+    if (statusCode === 401) {
       return res.json({
         status: 'invalid',
         statusCode,
         keyPreview,
-        usage: { total: 0, used: 0, remaining: 0 }
-      });
-    } else if (statusCode === 402) {
-      return res.json({
-        status: 'quota_exceeded',
-        statusCode,
-        keyPreview,
-        usage: usage || { total: 0, used: 0, remaining: 0 }
-      });
-    } else {
-      return res.json({
-        status: 'unknown',
-        statusCode,
-        keyPreview,
-        usage: usage || { total: 0, used: 0, remaining: 0 }
+        usage: { total: 0, used: 0, remaining: 0 },
+        message: 'Unauthorized - check API key'
       });
     }
+    
+    if (statusCode === 403) {
+      // 403 without specific error message - could be valid key with restrictions
+      return res.json({
+        status: 'restricted',
+        statusCode,
+        keyPreview,
+        usage: usage || { total: 0, used: 0, remaining: 0 },
+        message: 'Access forbidden - key may have restrictions'
+      });
+    }
+    
+    // Unknown status
+    return res.json({
+      status: 'unknown',
+      statusCode,
+      keyPreview,
+      usage: usage || { total: 0, used: 0, remaining: 0 },
+      message: `Unknown response (HTTP ${statusCode})`
+    });
 
   } catch (error) {
     return res.json({
       status: 'error',
       keyPreview,
       error: error.message,
-      usage: { total: 0, used: 0, remaining: 0 }
+      usage: { total: 0, used: 0, remaining: 0 },
+      message: 'Network or connection error'
     });
   }
 });
