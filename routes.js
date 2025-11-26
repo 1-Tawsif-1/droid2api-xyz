@@ -7,7 +7,7 @@ import { transformToOpenAI, getOpenAIHeaders } from './transformers/request-open
 import { transformToCommon, getCommonHeaders } from './transformers/request-common.js';
 import { AnthropicResponseTransformer } from './transformers/response-anthropic.js';
 import { OpenAIResponseTransformer } from './transformers/response-openai.js';
-import { getApiKey, rotateFactoryApiKey, hasMoreFactoryKeys, getCurrentKeyInfo } from './auth.js';
+import { getApiKey, rotateFactoryApiKey, hasMoreFactoryKeys, getCurrentKeyInfo, startNewRotationCycle } from './auth.js';
 import { getNextProxyAgent } from './proxy-manager.js';
 
 const router = express.Router();
@@ -30,7 +30,10 @@ function isQuotaOrAuthError(statusCode) {
 async function fetchWithFallback(url, fetchOptions, endpointName) {
   let lastError = null;
   let attempt = 1;
-  const maxAttempts = 2; // Try primary key, then fallback key
+  const maxAttempts = 10; // Allow trying all keys (up to 7) plus retries
+
+  // Start a new rotation cycle for this request
+  startNewRotationCycle();
 
   while (attempt <= maxAttempts) {
     try {
@@ -57,7 +60,7 @@ async function fetchWithFallback(url, fetchOptions, endpointName) {
         logError(`Factory API key failed with status ${response.status}`, new Error(errorText));
 
         // Try to rotate to next key if available
-        if (hasMoreFactoryKeys() && attempt < maxAttempts) {
+        if (hasMoreFactoryKeys()) {
           const rotated = rotateFactoryApiKey();
           if (rotated) {
             // Update the Authorization header with new key
@@ -71,7 +74,7 @@ async function fetchWithFallback(url, fetchOptions, endpointName) {
         }
 
         // No more keys to try, return the error response
-        logError(`All Factory API keys exhausted for ${endpointName}`, new Error('No more fallback keys available'));
+        logError(`All Factory API keys exhausted for ${endpointName}`, new Error('No more fallback keys available - tried all keys in cycle'));
         return response;
       }
 

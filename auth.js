@@ -14,6 +14,8 @@ let authSource = null; // 'env' or 'file' or 'factory_key' or 'client'
 let authFilePath = null;
 let factoryApiKeys = []; // Array of Factory API keys for fallback support
 let currentKeyIndex = 0; // Track which key is currently active
+let startingKeyIndex = 0; // Track where we started in current rotation cycle
+let hasCompletedFullCycle = false; // Track if we've tried all keys in current cycle
 
 const REFRESH_URL = 'https://api.workos.com/user_management/authenticate';
 const REFRESH_INTERVAL_HOURS = 6; // Refresh every 6 hours
@@ -339,7 +341,16 @@ export function rotateFactoryApiKey() {
   }
 
   const oldIndex = currentKeyIndex;
-  currentKeyIndex = (currentKeyIndex + 1) % factoryApiKeys.length;
+  const nextIndex = (currentKeyIndex + 1) % factoryApiKeys.length;
+
+  // Check if we've completed a full cycle (back to starting key)
+  if (nextIndex === startingKeyIndex) {
+    hasCompletedFullCycle = true;
+    logInfo('Completed full cycle through all Factory API keys');
+    return false;
+  }
+
+  currentKeyIndex = nextIndex;
 
   console.log('\n' + '='.repeat(80));
   console.log('🔄 FACTORY API KEY ROTATION');
@@ -357,7 +368,19 @@ export function rotateFactoryApiKey() {
  * Check if we have more Factory API keys available for fallback
  */
 export function hasMoreFactoryKeys() {
-  return authSource === 'factory_key' && factoryApiKeys.length > 1 && currentKeyIndex < factoryApiKeys.length - 1;
+  if (authSource !== 'factory_key' || factoryApiKeys.length <= 1) {
+    return false;
+  }
+  // Return false if we've already tried all keys in this cycle
+  return !hasCompletedFullCycle;
+}
+
+/**
+ * Start a new rotation cycle (call this at the beginning of each request)
+ */
+export function startNewRotationCycle() {
+  startingKeyIndex = currentKeyIndex;
+  hasCompletedFullCycle = false;
 }
 
 /**
