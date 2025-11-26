@@ -46,7 +46,9 @@ async function fetchWithFallback(url, fetchOptions, endpointName) {
 
       // Check if we got a quota or auth error
       if (isQuotaOrAuthError(response.status)) {
-        const errorText = await response.text();
+        // Clone response before reading body so original can still be returned
+        const responseClone = response.clone();
+        const errorText = await responseClone.text();
 
         console.log('\n' + '='.repeat(80));
         console.log('⚠️  API KEY FAILURE DETECTED');
@@ -73,7 +75,7 @@ async function fetchWithFallback(url, fetchOptions, endpointName) {
           }
         }
 
-        // No more keys to try, return the error response
+        // No more keys to try, return the original response (body not consumed)
         logError(`All Factory API keys exhausted for ${endpointName}`, new Error('No more fallback keys available - tried all keys in cycle'));
         return response;
       }
