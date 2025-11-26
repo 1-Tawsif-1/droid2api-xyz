@@ -16,6 +16,10 @@ let factoryApiKeys = []; // Array of Factory API keys for fallback support
 let currentKeyIndex = 0; // Track which key is currently active
 let startingKeyIndex = 0; // Track where we started in current rotation cycle
 let hasCompletedFullCycle = false; // Track if we've tried all keys in current cycle
+let rotationOccurredInCycle = false; // Track if rotation happened in current request
+let lastKey1AttemptTime = Date.now(); // Track when we last tried key #1
+
+const KEY1_RETRY_INTERVAL_MS = 30 * 60 * 1000; // Try key #1 every 30 minutes
 
 const REFRESH_URL = 'https://api.workos.com/user_management/authenticate';
 const REFRESH_INTERVAL_HOURS = 6; // Refresh every 6 hours
@@ -351,6 +355,7 @@ export function rotateFactoryApiKey() {
   }
 
   currentKeyIndex = nextIndex;
+  rotationOccurredInCycle = true;
 
   console.log('\n' + '='.repeat(80));
   console.log('🔄 FACTORY API KEY ROTATION');
@@ -377,10 +382,41 @@ export function hasMoreFactoryKeys() {
 
 /**
  * Start a new rotation cycle (call this at the beginning of each request)
+ * Periodically resets to key #1 to check if earlier keys have recovered
  */
 export function startNewRotationCycle() {
+  // Check if we should try key #1 again (periodic reset)
+  if (currentKeyIndex > 0 && factoryApiKeys.length > 1) {
+    const timeSinceKey1 = Date.now() - lastKey1AttemptTime;
+    if (timeSinceKey1 >= KEY1_RETRY_INTERVAL_MS) {
+      console.log('\n' + '='.repeat(80));
+      console.log('🔄 PERIODIC KEY #1 RETRY');
+      console.log('='.repeat(80));
+      console.log(`Time since last key #1 attempt: ${Math.round(timeSinceKey1 / 60000)} minutes`);
+      console.log(`Resetting to key #1 to check if earlier keys have recovered`);
+      console.log('='.repeat(80) + '\n');
+      
+      currentKeyIndex = 0;
+      lastKey1AttemptTime = Date.now();
+      logInfo('Periodic reset to key #1 to check if earlier keys recovered');
+    }
+  }
+  
+  // If we're on key #1, update the last attempt time
+  if (currentKeyIndex === 0) {
+    lastKey1AttemptTime = Date.now();
+  }
+  
   startingKeyIndex = currentKeyIndex;
   hasCompletedFullCycle = false;
+  rotationOccurredInCycle = false;
+}
+
+/**
+ * Check if rotation occurred in the current request cycle
+ */
+export function didRotationOccur() {
+  return rotationOccurredInCycle;
 }
 
 /**

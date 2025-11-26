@@ -7,7 +7,7 @@ import { transformToOpenAI, getOpenAIHeaders } from './transformers/request-open
 import { transformToCommon, getCommonHeaders } from './transformers/request-common.js';
 import { AnthropicResponseTransformer } from './transformers/response-anthropic.js';
 import { OpenAIResponseTransformer } from './transformers/response-openai.js';
-import { getApiKey, rotateFactoryApiKey, hasMoreFactoryKeys, getCurrentKeyInfo, startNewRotationCycle } from './auth.js';
+import { getApiKey, rotateFactoryApiKey, hasMoreFactoryKeys, getCurrentKeyInfo, startNewRotationCycle, didRotationOccur } from './auth.js';
 import { getNextProxyAgent } from './proxy-manager.js';
 
 const router = express.Router();
@@ -78,16 +78,18 @@ async function fetchWithFallback(url, fetchOptions, endpointName) {
         return response;
       }
 
-      // Success! Log if we're using a fallback key
-      const keyInfo2 = getCurrentKeyInfo();
-      if (keyInfo2 && keyInfo2.index > 1) {
-        console.log('\n' + '='.repeat(80));
-        console.log('✅ FALLBACK KEY SUCCESS');
-        console.log('='.repeat(80));
-        console.log(`Endpoint: ${endpointName}`);
-        console.log(`Active key: #${keyInfo2.index}/${keyInfo2.total}`);
-        console.log(`Status: ${response.status}`);
-        console.log('='.repeat(80) + '\n');
+      // Success! Log only if rotation actually happened in this request
+      if (didRotationOccur()) {
+        const keyInfo2 = getCurrentKeyInfo();
+        if (keyInfo2) {
+          console.log('\n' + '='.repeat(80));
+          console.log('✅ FALLBACK KEY SUCCESS');
+          console.log('='.repeat(80));
+          console.log(`Endpoint: ${endpointName}`);
+          console.log(`Active key: #${keyInfo2.index}/${keyInfo2.total}`);
+          console.log(`Status: ${response.status}`);
+          console.log('='.repeat(80) + '\n');
+        }
       }
 
       return response;
