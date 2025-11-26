@@ -63,12 +63,22 @@ export function transformToOpenAI(openaiRequest) {
     }
   }
 
-  // Transform tools if present
+  // Transform tools if present (flatten function object for /v1/responses format)
   if (openaiRequest.tools && Array.isArray(openaiRequest.tools)) {
-    targetRequest.tools = openaiRequest.tools.map(tool => ({
-      ...tool,
-      strict: false
-    }));
+    targetRequest.tools = openaiRequest.tools.map(tool => {
+      if (tool.type === 'function' && tool.function) {
+        // Convert chat completions format to responses format
+        return {
+          type: 'function',
+          name: tool.function.name,
+          description: tool.function.description,
+          parameters: tool.function.parameters,
+          strict: false
+        };
+      }
+      // Pass through other tool types as-is
+      return { ...tool, strict: false };
+    });
   }
 
   // Extract system message as instructions and prepend system prompt
