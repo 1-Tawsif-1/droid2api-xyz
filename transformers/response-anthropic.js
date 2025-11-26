@@ -7,6 +7,11 @@ export class AnthropicResponseTransformer {
     this.created = Math.floor(Date.now() / 1000);
     this.messageId = null;
     this.currentIndex = 0;
+    // Tool call tracking
+    this.toolCalls = new Map(); // Map of block_index -> {index, id, name, arguments}
+    this.toolCallIndex = 0;
+    this.currentBlockIndex = null;
+    this.currentBlockType = null;
   }
 
   parseSSELine(line) {
@@ -33,15 +38,57 @@ export class AnthropicResponseTransformer {
     }
 
     if (eventType === 'content_block_start') {
+      const contentBlock = eventData.content_block;
+      this.currentBlockIndex = eventData.index;
+      this.currentBlockType = contentBlock?.type;
+      
+      // Handle tool_use content block
+      if (contentBlock?.type === 'tool_use') {
+        const toolCallId = contentBlock.id || `call_${Date.now()}`;
+        const index = this.toolCallIndex++;
+        
+        this.toolCalls.set(this.currentBlockIndex, {
+          index: index,
+          id: toolCallId,
+          name: contentBlock.name || '',
+          arguments: ''
+        });
+        
+        // Emit initial tool call chunk with function name
+        return this.createToolCallChunk(index, toolCallId, contentBlock.name || '', '', true);
+      }
       return null;
     }
 
     if (eventType === 'content_block_delta') {
+      // Handle text delta
+      if (eventData.delta?.type === 'text_delta') {
+        const text = eventData.delta?.text || '';
+        return this.createOpenAIChunk(text, null, false);
+      }
+      
+      // Handle tool_use input_json_delta
+      if (eventData.delta?.type === 'input_json_delta') {
+        const partialJson = eventData.delta?.partial_json || '';
+        const toolCall = this.toolCalls.get(eventData.index);
+        if (toolCall) {
+          toolCall.arguments += partialJson;
+          // Emit argument delta chunk
+          return this.createToolCallChunk(toolCall.index, toolCall.id, null, partialJson, false);
+        }
+      }
+      
+      // Fallback for old format (text directly in delta)
       const text = eventData.delta?.text || '';
-      return this.createOpenAIChunk(text, null, false);
+      if (text) {
+        return this.createOpenAIChunk(text, null, false);
+      }
+      return null;
     }
 
     if (eventType === 'content_block_stop') {
+      this.currentBlockIndex = null;
+      this.currentBlockType = null;
       return null;
     }
 
@@ -101,6 +148,47 @@ export class AnthropicResponseTransformer {
       'tool_use': 'tool_calls'
     };
     return mapping[anthropicReason] || 'stop';
+  }
+
+  createToolCallChunk(index, toolCallId, functionName, argumentsDelta, isFirst) {
+    const chunk = {
+      id: this.requestId,
+      object: 'chat.completion.chunk',
+      created: this.created,
+      model: this.model,
+      choices: [
+        {
+          index: 0,
+          delta: {
+            tool_calls: [
+              {
+                index: index
+              }
+            ]
+          },
+          finish_reason: null
+        }
+      ]
+    };
+
+    const toolCallDelta = chunk.choices[0].delta.tool_calls[0];
+
+    // On first chunk, include id, type, and function name
+    if (isFirst) {
+      toolCallDelta.id = toolCallId;
+      toolCallDelta.type = 'function';
+      toolCallDelta.function = {
+        name: functionName,
+        arguments: ''
+      };
+    } else {
+      // On subsequent chunks, only include arguments delta
+      toolCallDelta.function = {
+        arguments: argumentsDelta
+      };
+    }
+
+    return `data: ${JSON.stringify(chunk)}\n\n`;
   }
 
   async *transformStream(sourceStream) {

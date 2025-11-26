@@ -5,6 +5,9 @@ export class OpenAIResponseTransformer {
     this.model = model;
     this.requestId = requestId || `chatcmpl-${Date.now()}`;
     this.created = Math.floor(Date.now() / 1000);
+    // Tool call tracking
+    this.toolCalls = new Map(); // Map of item_id -> {index, id, name, arguments}
+    this.toolCallIndex = 0;
   }
 
   parseSSELine(line) {
@@ -42,12 +45,53 @@ export class OpenAIResponseTransformer {
       return null;
     }
 
+    // Handle tool call (function call) output item added
+    if (eventType === 'response.output_item.added') {
+      const item = eventData.item;
+      if (item && item.type === 'function_call') {
+        const toolCallId = item.call_id || item.id || `call_${Date.now()}`;
+        const index = this.toolCallIndex++;
+        
+        this.toolCalls.set(item.id, {
+          index: index,
+          id: toolCallId,
+          name: item.name || '',
+          arguments: ''
+        });
+        
+        // Emit initial tool call chunk with function name
+        return this.createToolCallChunk(index, toolCallId, item.name || '', '', true);
+      }
+      return null;
+    }
+
+    // Handle streaming function call arguments
+    if (eventType === 'response.function_call_arguments.delta') {
+      const itemId = eventData.item_id;
+      const delta = eventData.delta || '';
+      
+      const toolCall = this.toolCalls.get(itemId);
+      if (toolCall) {
+        toolCall.arguments += delta;
+        // Emit argument delta chunk
+        return this.createToolCallChunk(toolCall.index, toolCall.id, null, delta, false);
+      }
+      return null;
+    }
+
+    // Handle function call arguments complete
+    if (eventType === 'response.function_call_arguments.done') {
+      // Arguments are complete, no need to emit anything special
+      return null;
+    }
+
     if (eventType === 'response.done') {
       const status = eventData.response?.status;
       let finishReason = 'stop';
       
       if (status === 'completed') {
-        finishReason = 'stop';
+        // Check if we had tool calls
+        finishReason = this.toolCalls.size > 0 ? 'tool_calls' : 'stop';
       } else if (status === 'incomplete') {
         finishReason = 'length';
       }
@@ -87,6 +131,47 @@ export class OpenAIResponseTransformer {
 
   createDoneSignal() {
     return 'data: [DONE]\n\n';
+  }
+
+  createToolCallChunk(index, toolCallId, functionName, argumentsDelta, isFirst) {
+    const chunk = {
+      id: this.requestId,
+      object: 'chat.completion.chunk',
+      created: this.created,
+      model: this.model,
+      choices: [
+        {
+          index: 0,
+          delta: {
+            tool_calls: [
+              {
+                index: index
+              }
+            ]
+          },
+          finish_reason: null
+        }
+      ]
+    };
+
+    const toolCallDelta = chunk.choices[0].delta.tool_calls[0];
+
+    // On first chunk, include id, type, and function name
+    if (isFirst) {
+      toolCallDelta.id = toolCallId;
+      toolCallDelta.type = 'function';
+      toolCallDelta.function = {
+        name: functionName,
+        arguments: ''
+      };
+    } else {
+      // On subsequent chunks, only include arguments delta
+      toolCallDelta.function = {
+        arguments: argumentsDelta
+      };
+    }
+
+    return `data: ${JSON.stringify(chunk)}\n\n`;
   }
 
   async *transformStream(sourceStream) {
