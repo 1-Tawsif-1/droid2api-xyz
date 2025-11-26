@@ -25,6 +25,47 @@ export function transformToOpenAI(openaiRequest) {
   // Transform messages to input
   if (openaiRequest.messages && Array.isArray(openaiRequest.messages)) {
     for (const msg of openaiRequest.messages) {
+      // Handle tool result messages (role: "tool")
+      if (msg.role === 'tool') {
+        const toolResultItem = {
+          type: 'function_call_output',
+          call_id: msg.tool_call_id,
+          output: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)
+        };
+        targetRequest.input.push(toolResultItem);
+        continue;
+      }
+
+      // Handle assistant messages with tool_calls
+      if (msg.role === 'assistant' && msg.tool_calls && Array.isArray(msg.tool_calls)) {
+        // First add any text content if present
+        if (msg.content) {
+          const textMsg = {
+            role: 'assistant',
+            content: [{
+              type: 'output_text',
+              text: typeof msg.content === 'string' ? msg.content : ''
+            }]
+          };
+          if (textMsg.content[0].text) {
+            targetRequest.input.push(textMsg);
+          }
+        }
+        
+        // Then add each tool call as a function_call item
+        for (const toolCall of msg.tool_calls) {
+          const functionCallItem = {
+            type: 'function_call',
+            id: toolCall.id,
+            call_id: toolCall.id,
+            name: toolCall.function?.name || '',
+            arguments: toolCall.function?.arguments || '{}'
+          };
+          targetRequest.input.push(functionCallItem);
+        }
+        continue;
+      }
+
       const inputMsg = {
         role: msg.role,
         content: []
@@ -59,7 +100,10 @@ export function transformToOpenAI(openaiRequest) {
         }
       }
 
-      targetRequest.input.push(inputMsg);
+      // Only add message if it has content
+      if (inputMsg.content.length > 0) {
+        targetRequest.input.push(inputMsg);
+      }
     }
   }
 
