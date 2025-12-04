@@ -128,6 +128,7 @@ export class OpenAIResponseTransformer {
       object: 'chat.completion.chunk',
       created: this.created,
       model: this.model,
+      system_fingerprint: 'fp_factory',
       choices: [
         {
           index: 0,
@@ -157,6 +158,7 @@ export class OpenAIResponseTransformer {
       object: 'chat.completion.chunk',
       created: this.created,
       model: this.model,
+      system_fingerprint: 'fp_factory',
       choices: [
         {
           index: 0,
