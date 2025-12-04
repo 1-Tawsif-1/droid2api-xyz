@@ -1,13 +1,13 @@
 import express from 'express';
 import fetch from 'node-fetch';
 import { getConfig, getModelById, getEndpointByType, getSystemPrompt, getModelReasoning, getRedirectedModelId, getModelProvider } from './config.js';
-import { logInfo, logDebug, logError, logRequest, logResponse } from './logger.js';
+import { logInfo, logDebug, logError, logRequest, logResponse, setCurrentModel } from './logger.js';
 import { transformToAnthropic, getAnthropicHeaders } from './transformers/request-anthropic.js';
 import { transformToOpenAI, getOpenAIHeaders } from './transformers/request-openai.js';
 import { transformToCommon, getCommonHeaders } from './transformers/request-common.js';
 import { AnthropicResponseTransformer } from './transformers/response-anthropic.js';
 import { OpenAIResponseTransformer } from './transformers/response-openai.js';
-import { getApiKey, rotateFactoryApiKey, hasMoreFactoryKeys, getCurrentKeyInfo, startNewRotationCycle, didRotationOccur } from './auth.js';
+import { getApiKey, rotateFactoryApiKey, hasMoreFactoryKeys, startNewRotationCycle } from './auth.js';
 import { getNextProxyAgent } from './proxy-manager.js';
 
 const router = express.Router();
@@ -37,11 +37,6 @@ async function fetchWithFallback(url, fetchOptions, endpointName) {
 
   while (attempt <= maxAttempts) {
     try {
-      const keyInfo = getCurrentKeyInfo();
-      if (keyInfo) {
-        logInfo(`[Attempt ${attempt}/${maxAttempts}] Using Factory API key #${keyInfo.index}/${keyInfo.total} for ${endpointName}`);
-      }
-
       const response = await fetch(url, fetchOptions);
 
       // Check if we got a quota or auth error
@@ -49,17 +44,7 @@ async function fetchWithFallback(url, fetchOptions, endpointName) {
         // Clone response before reading body so original can still be returned
         const responseClone = response.clone();
         const errorText = await responseClone.text();
-
-        console.log('\n' + '='.repeat(80));
-        console.log('⚠️  API KEY FAILURE DETECTED');
-        console.log('='.repeat(80));
-        console.log(`Endpoint: ${endpointName}`);
-        console.log(`Status: ${response.status}`);
-        console.log(`Error: ${errorText.substring(0, 200)}`);
-        console.log(`Attempt: ${attempt}/${maxAttempts}`);
-        console.log('='.repeat(80) + '\n');
-
-        logError(`Factory API key failed with status ${response.status}`, new Error(errorText));
+        logError(`API key failed: ${response.status} - ${errorText.substring(0, 100)}`);
 
         // Try to rotate to next key if available
         if (hasMoreFactoryKeys()) {
@@ -68,8 +53,6 @@ async function fetchWithFallback(url, fetchOptions, endpointName) {
             // Update the Authorization header with new key
             const newAuthHeader = await getApiKey();
             fetchOptions.headers.authorization = newAuthHeader;
-
-            logInfo(`Retrying ${endpointName} with fallback key...`);
             attempt++;
             continue; // Retry with new key
           }
@@ -78,20 +61,6 @@ async function fetchWithFallback(url, fetchOptions, endpointName) {
         // No more keys to try, return the original response (body not consumed)
         logError(`All Factory API keys exhausted for ${endpointName}`, new Error('No more fallback keys available - tried all keys in cycle'));
         return response;
-      }
-
-      // Success! Log only if rotation actually happened in this request
-      if (didRotationOccur()) {
-        const keyInfo2 = getCurrentKeyInfo();
-        if (keyInfo2) {
-          console.log('\n' + '='.repeat(80));
-          console.log('✅ FALLBACK KEY SUCCESS');
-          console.log('='.repeat(80));
-          console.log(`Endpoint: ${endpointName}`);
-          console.log(`Active key: #${keyInfo2.index}/${keyInfo2.total}`);
-          console.log(`Status: ${response.status}`);
-          console.log('='.repeat(80) + '\n');
-        }
       }
 
       return response;
@@ -177,11 +146,12 @@ router.get('/v1/models', (req, res) => {
 
 // 标准 OpenAI 聊天补全处理函数（带格式转换）
 async function handleChatCompletions(req, res) {
-  logInfo('POST /v1/chat/completions');
-
   try {
     const openaiRequest = req.body;
     const modelId = getRedirectedModelId(openaiRequest.model);
+    setCurrentModel(modelId); // Set model context for filtered logging
+
+    logInfo('POST /v1/chat/completions');
 
     if (!modelId) {
       return res.status(400).json({ error: 'model is required' });
@@ -362,11 +332,12 @@ async function handleChatCompletions(req, res) {
 
 // 直接转发 OpenAI 请求（不做格式转换）
 async function handleDirectResponses(req, res) {
-  logInfo('POST /v1/responses');
-
   try {
     const openaiRequest = req.body;
     const modelId = getRedirectedModelId(openaiRequest.model);
+    setCurrentModel(modelId);
+
+    logInfo('POST /v1/responses');
 
     if (!modelId) {
       return res.status(400).json({ error: 'model is required' });
@@ -513,11 +484,12 @@ async function handleDirectResponses(req, res) {
 
 // 直接转发 Anthropic 请求（不做格式转换）
 async function handleDirectMessages(req, res) {
-  logInfo('POST /v1/messages');
-
   try {
     const anthropicRequest = req.body;
     const modelId = getRedirectedModelId(anthropicRequest.model);
+    setCurrentModel(modelId);
+
+    logInfo('POST /v1/messages');
 
     if (!modelId) {
       return res.status(400).json({ error: 'model is required' });
@@ -668,11 +640,12 @@ async function handleDirectMessages(req, res) {
 
 // 处理 Anthropic count_tokens 请求
 async function handleCountTokens(req, res) {
-  logInfo('POST /v1/messages/count_tokens');
-
   try {
     const anthropicRequest = req.body;
     const modelId = getRedirectedModelId(anthropicRequest.model);
+    setCurrentModel(modelId);
+
+    logInfo('POST /v1/messages/count_tokens');
 
     if (!modelId) {
       return res.status(400).json({ error: 'model is required' });

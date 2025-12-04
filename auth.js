@@ -90,19 +90,8 @@ function loadAuthConfig() {
   }
 
   if (factoryApiKeys.length > 0) {
-    console.log('\n' + '='.repeat(80));
-    console.log('✅ FACTORY API KEYS LOADED SUCCESSFULLY');
-    console.log('='.repeat(80));
-    console.log(`Total keys loaded: ${factoryApiKeys.length}/7`);
-    console.log('Keys will be used as fallback one after another on quota/auth errors');
-    console.log('-'.repeat(80));
-    factoryApiKeys.forEach((key, index) => {
-      const envName = index === 0 ? 'FACTORY_API_KEY' : `FACTORY_API_KEY_${index + 1}`;
-      console.log(`  Key #${index + 1}: ${envName} (${key.substring(0, 15)}...)`);
-    });
-    console.log('='.repeat(80) + '\n');
-
-    logInfo(`Loaded ${factoryApiKeys.length} Factory API key(s) for fallback support`);
+    // Minimal startup log
+    console.log(`[AUTH] Loaded ${factoryApiKeys.length} Factory API keys`);
     authSource = 'factory_key';
     currentKeyIndex = 0;
     return { type: 'factory_key', value: factoryApiKeys };
@@ -356,16 +345,7 @@ export function rotateFactoryApiKey() {
 
   currentKeyIndex = nextIndex;
   rotationOccurredInCycle = true;
-
-  console.log('\n' + '='.repeat(80));
-  console.log('🔄 FACTORY API KEY ROTATION');
-  console.log('='.repeat(80));
-  console.log(`Previous key: #${oldIndex + 1} (${factoryApiKeys[oldIndex].substring(0, 10)}...)`);
-  console.log(`New active key: #${currentKeyIndex + 1} (${factoryApiKeys[currentKeyIndex].substring(0, 10)}...)`);
-  console.log(`Reason: Previous key failed (quota exceeded or authentication error)`);
-  console.log('='.repeat(80) + '\n');
-
-  logInfo(`Rotated to Factory API key #${currentKeyIndex + 1}`);
+  logDebug(`Key rotation: #${oldIndex + 1} -> #${currentKeyIndex + 1}`);
   return true;
 }
 
@@ -389,16 +369,9 @@ export function startNewRotationCycle() {
   if (currentKeyIndex > 0 && factoryApiKeys.length > 1) {
     const timeSinceKey1 = Date.now() - lastKey1AttemptTime;
     if (timeSinceKey1 >= KEY1_RETRY_INTERVAL_MS) {
-      console.log('\n' + '='.repeat(80));
-      console.log('🔄 PERIODIC KEY #1 RETRY');
-      console.log('='.repeat(80));
-      console.log(`Time since last key #1 attempt: ${Math.round(timeSinceKey1 / 60000)} minutes`);
-      console.log(`Resetting to key #1 to check if earlier keys have recovered`);
-      console.log('='.repeat(80) + '\n');
-      
       currentKeyIndex = 0;
       lastKey1AttemptTime = Date.now();
-      logInfo('Periodic reset to key #1 to check if earlier keys recovered');
+      logDebug('Periodic reset to key #1');
     }
   }
   
