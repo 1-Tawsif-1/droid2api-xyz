@@ -36,12 +36,12 @@ export class OpenAIResponseTransformer {
       return null;
     }
 
-    // Handle text delta events (multiple formats)
+    // Handle text delta events (multiple formats) - always include role
     if (eventType === 'response.output_text.delta' || 
         eventType === 'response.text.delta' ||
         eventType === 'response.content_part.delta') {
       const text = eventData.delta || eventData.text || '';
-      return this.createOpenAIChunk(text, null, false);
+      return this.createOpenAIChunk(text, 'assistant', false);
     }
 
     if (eventType === 'response.output_text.done' ||
@@ -101,6 +101,19 @@ export class OpenAIResponseTransformer {
       return null;
     }
 
+    // Handle complete tool call (response.output_item.done) - CLIProxyAPI style
+    if (eventType === 'response.output_item.done') {
+      const item = eventData.item;
+      if (item && item.type === 'function_call') {
+        const toolCallId = item.call_id || item.id || `call_${Date.now()}`;
+        const index = this.toolCallIndex++;
+        
+        // Emit complete tool call in one chunk
+        return this.createCompleteToolCallChunk(index, toolCallId, item.name || '', item.arguments || '{}');
+      }
+      return null;
+    }
+
     if (eventType === 'response.done' || eventType === 'response.completed') {
       const status = eventData.response?.status || eventData.status || 'completed';
       let finishReason = 'stop';
@@ -128,7 +141,6 @@ export class OpenAIResponseTransformer {
       object: 'chat.completion.chunk',
       created: this.created,
       model: this.model,
-      system_fingerprint: 'fp_factory',
       choices: [
         {
           index: 0,
@@ -158,7 +170,6 @@ export class OpenAIResponseTransformer {
       object: 'chat.completion.chunk',
       created: this.created,
       model: this.model,
-      system_fingerprint: 'fp_factory',
       choices: [
         {
           index: 0,
@@ -190,6 +201,39 @@ export class OpenAIResponseTransformer {
         arguments: argumentsDelta
       };
     }
+
+    return `data: ${JSON.stringify(chunk)}\n\n`;
+  }
+
+  // Create a complete tool call chunk (for response.output_item.done event)
+  createCompleteToolCallChunk(index, toolCallId, functionName, functionArgs) {
+    const chunk = {
+      id: this.requestId,
+      object: 'chat.completion.chunk',
+      created: this.created,
+      model: this.model,
+      system_fingerprint: 'fp_factory',
+      choices: [
+        {
+          index: 0,
+          delta: {
+            role: 'assistant',
+            tool_calls: [
+              {
+                index: index,
+                id: toolCallId,
+                type: 'function',
+                function: {
+                  name: functionName,
+                  arguments: functionArgs
+                }
+              }
+            ]
+          },
+          finish_reason: null
+        }
+      ]
+    };
 
     return `data: ${JSON.stringify(chunk)}\n\n`;
   }
