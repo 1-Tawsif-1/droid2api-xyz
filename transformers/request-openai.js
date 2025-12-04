@@ -170,11 +170,12 @@ export function transformToOpenAI(openaiRequest) {
     delete targetRequest.reasoning;
   }
 
-  // Pass through other parameters
-  if (openaiRequest.temperature !== undefined) {
+  // Pass through other parameters (skip temperature for codex models)
+  const isCodexModel = openaiRequest.model?.toLowerCase().includes('codex');
+  if (openaiRequest.temperature !== undefined && !isCodexModel) {
     targetRequest.temperature = openaiRequest.temperature;
   }
-  if (openaiRequest.top_p !== undefined) {
+  if (openaiRequest.top_p !== undefined && !isCodexModel) {
     targetRequest.top_p = openaiRequest.top_p;
   }
   if (openaiRequest.presence_penalty !== undefined) {
