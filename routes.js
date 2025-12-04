@@ -1,7 +1,7 @@
 import express from 'express';
 import fetch from 'node-fetch';
 import { getConfig, getModelById, getEndpointByType, getSystemPrompt, getModelReasoning, getRedirectedModelId, getModelProvider } from './config.js';
-import { logInfo, logDebug, logError, logRequest, logResponse, setCurrentModel } from './logger.js';
+import { logInfo, logDebug, logError, logRequest, logResponse } from './logger.js';
 import { transformToAnthropic, getAnthropicHeaders } from './transformers/request-anthropic.js';
 import { transformToOpenAI, getOpenAIHeaders } from './transformers/request-openai.js';
 import { transformToCommon, getCommonHeaders } from './transformers/request-common.js';
@@ -146,12 +146,11 @@ router.get('/v1/models', (req, res) => {
 
 // 标准 OpenAI 聊天补全处理函数（带格式转换）
 async function handleChatCompletions(req, res) {
+  logInfo('POST /v1/chat/completions');
+
   try {
     const openaiRequest = req.body;
     const modelId = getRedirectedModelId(openaiRequest.model);
-    setCurrentModel(modelId); // Set model context for filtered logging
-
-    logInfo('POST /v1/chat/completions');
 
     if (!modelId) {
       return res.status(400).json({ error: 'model is required' });
@@ -332,12 +331,11 @@ async function handleChatCompletions(req, res) {
 
 // 直接转发 OpenAI 请求（不做格式转换）
 async function handleDirectResponses(req, res) {
+  logInfo('POST /v1/responses');
+
   try {
     const openaiRequest = req.body;
     const modelId = getRedirectedModelId(openaiRequest.model);
-    setCurrentModel(modelId);
-
-    logInfo('POST /v1/responses');
 
     if (!modelId) {
       return res.status(400).json({ error: 'model is required' });
@@ -484,12 +482,11 @@ async function handleDirectResponses(req, res) {
 
 // 直接转发 Anthropic 请求（不做格式转换）
 async function handleDirectMessages(req, res) {
+  logInfo('POST /v1/messages');
+
   try {
     const anthropicRequest = req.body;
     const modelId = getRedirectedModelId(anthropicRequest.model);
-    setCurrentModel(modelId);
-
-    logInfo('POST /v1/messages');
 
     if (!modelId) {
       return res.status(400).json({ error: 'model is required' });
@@ -640,12 +637,11 @@ async function handleDirectMessages(req, res) {
 
 // 处理 Anthropic count_tokens 请求
 async function handleCountTokens(req, res) {
+  logInfo('POST /v1/messages/count_tokens');
+
   try {
     const anthropicRequest = req.body;
     const modelId = getRedirectedModelId(anthropicRequest.model);
-    setCurrentModel(modelId);
-
-    logInfo('POST /v1/messages/count_tokens');
 
     if (!modelId) {
       return res.status(400).json({ error: 'model is required' });
