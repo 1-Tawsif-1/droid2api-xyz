@@ -36,13 +36,29 @@ export class OpenAIResponseTransformer {
       return null;
     }
 
-    if (eventType === 'response.output_text.delta') {
+    // Handle text delta events (multiple formats)
+    if (eventType === 'response.output_text.delta' || 
+        eventType === 'response.text.delta' ||
+        eventType === 'response.content_part.delta') {
       const text = eventData.delta || eventData.text || '';
       return this.createOpenAIChunk(text, null, false);
     }
 
-    if (eventType === 'response.output_text.done') {
+    if (eventType === 'response.output_text.done' ||
+        eventType === 'response.text.done' ||
+        eventType === 'response.content_part.done') {
       return null;
+    }
+    
+    // Handle content part added
+    if (eventType === 'response.content_part.added' ||
+        eventType === 'response.output_item.added') {
+      // Check if it's a text part (not function call)
+      const item = eventData.item || eventData.part;
+      if (item && item.type === 'output_text') {
+        return null; // Text parts don't need special handling on add
+      }
+      // Fall through for function_call handling below
     }
 
     // Handle tool call (function call) output item added
@@ -85,8 +101,8 @@ export class OpenAIResponseTransformer {
       return null;
     }
 
-    if (eventType === 'response.done') {
-      const status = eventData.response?.status;
+    if (eventType === 'response.done' || eventType === 'response.completed') {
+      const status = eventData.response?.status || eventData.status || 'completed';
       let finishReason = 'stop';
       
       if (status === 'completed') {
@@ -96,11 +112,13 @@ export class OpenAIResponseTransformer {
         finishReason = 'length';
       }
 
+      this.isDone = true;
       const finalChunk = this.createOpenAIChunk('', null, true, finishReason);
       const done = this.createDoneSignal();
       return finalChunk + done;
     }
 
+    // Ignore other events silently
     return null;
   }
 
@@ -177,6 +195,7 @@ export class OpenAIResponseTransformer {
   async *transformStream(sourceStream) {
     let buffer = '';
     let currentEvent = null;
+    this.isDone = false;
 
     try {
       for await (const chunk of sourceStream) {
@@ -197,15 +216,22 @@ export class OpenAIResponseTransformer {
             if (transformed) {
               yield transformed;
             }
+            currentEvent = null; // Reset after processing
           }
         }
       }
 
-      if (currentEvent === 'response.done' || currentEvent === 'response.completed') {
+      // Ensure DONE signal is sent if stream ended without response.done
+      if (!this.isDone) {
+        yield this.createOpenAIChunk('', null, true, 'stop');
         yield this.createDoneSignal();
       }
     } catch (error) {
       logDebug('Error in OpenAI stream transformation', error);
+      // Send DONE signal even on error to prevent client hanging
+      if (!this.isDone) {
+        yield this.createDoneSignal();
+      }
       throw error;
     }
   }
