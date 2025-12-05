@@ -23,7 +23,7 @@
   "models": [
     {
       "name": "Opus 4.1",
-      "id": "claude-opus-4-1-20250805",
+      "id": "close-work-4-1-20250805",
       "type": "anthropic",
       "reasoning": "auto",
       "provider": "anthropic"
@@ -53,7 +53,7 @@
       "name": "GPT-5-Codex",
       "id": "gpt-5-codex",
       "type": "openai",
-      "reasoning": "off",
+      "reasoning": "auto",
       "provider": "openai"
     },
     {
@@ -67,7 +67,7 @@
       "name": "GPT-5.1-Codex",
       "id": "gpt-5.1-codex",
       "type": "openai",
-      "reasoning": "off",
+      "reasoning": "auto",
       "provider": "openai"
     },
     {
