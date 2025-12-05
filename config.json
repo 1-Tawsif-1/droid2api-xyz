@@ -72,7 +72,7 @@
     },
     {
       "name": "GPT-5.1-Codex-Max",
-      "id": "gpt-5.1-code-max",
+      "id": "gpt-5.1-codex-max",
       "type": "openai",
       "reasoning": "high",
       "provider": "openai"
