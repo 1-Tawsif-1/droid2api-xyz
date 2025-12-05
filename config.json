@@ -25,28 +25,28 @@
       "name": "Opus 4.1",
       "id": "close-work-4-1-20250805",
       "type": "anthropic",
-      "reasoning": "auto",
+      "reasoning": "high",
       "provider": "anthropic"
     },
     {
       "name": "Haiku 4.5",
       "id": "claude-haiku-4-5-20251001",
       "type": "anthropic",
-      "reasoning": "auto",
+      "reasoning": "high",
       "provider": "anthropic"
     },
     {
       "name": "Sonnet 4.5",
       "id": "claude-sonnet-4-5-20250929",
       "type": "anthropic",
-      "reasoning": "auto",
+      "reasoning": "high",
       "provider": "anthropic"
     },
     {
       "name": "Opus 4.5",
       "id": "claude-opus-4-5-20251101",
       "type": "anthropic",
-      "reasoning": "auto",
+      "reasoning": "high",
       "provider": "anthropic"
     },
     {
